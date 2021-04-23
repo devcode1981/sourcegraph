@@ -12,13 +12,16 @@ fi
 
 IMAGE=sourcegraph/grafana:dev
 CONTAINER=grafana
+PORT=3370
 
 # docker containers must access things via docker host on non-linux platforms
-CONFIG_SUB_DIR="all"
 DOCKER_USER=""
+ADD_HOST_FLAG=""
 
 if [[ "$OSTYPE" == "linux-gnu" ]]; then
-  CONFIG_SUB_DIR="linux"
+  # Linux needs an extra arg to support host.internal.docker, which is how grafana connects
+  # to the prometheus backend.
+  ADD_HOST_FLAG="--add-host=host.docker.internal:host-gateway"
 
   # Docker users on Linux will generally be using direct user mapping, which
   # means that they'll want the data in the volume mount to be owned by the
@@ -29,11 +32,6 @@ if [[ "$OSTYPE" == "linux-gnu" ]]; then
 fi
 
 docker inspect $CONTAINER >/dev/null 2>&1 && docker rm -f $CONTAINER
-
-# Generate Grafana dashboards
-pushd monitoring >/dev/null || exit 1
-RELOAD=false go generate
-popd >/dev/null || exit 1
 
 # Log file location: since we log outside of the Docker container, we should
 # log somewhere that's _not_ ~/.sourcegraph-dev/data/grafana, since that gets
@@ -48,8 +46,9 @@ mkdir -p "${GRAFANA_LOGS}"
 GRAFANA_LOG_FILE="${GRAFANA_LOGS}/grafana.log"
 
 # Quickly build image
+echo "Grafana: building ${IMAGE}..."
 IMAGE=${IMAGE} CACHE=true ./docker-images/grafana/build.sh >"${GRAFANA_LOG_FILE}" 2>&1 ||
-  (BUILD_EXIT_CODE=$? && echo "build failed; dumping log:" && cat "${GRAFANA_LOG_FILE}" && exit $BUILD_EXIT_CODE)
+  (BUILD_EXIT_CODE=$? && echo "Grafana build failed; dumping log:" && cat "${GRAFANA_LOG_FILE}" && exit $BUILD_EXIT_CODE)
 
 function finish() {
   GRAFANA_EXIT_CODE=$?
@@ -66,15 +65,16 @@ function finish() {
   return $GRAFANA_EXIT_CODE
 }
 
+echo "Grafana: serving on http://localhost:${PORT}"
+echo "Grafana: note that logs are piped to ${GRAFANA_LOG_FILE}"
 docker run --rm ${DOCKER_USER} \
   --name=${CONTAINER} \
   --cpus=1 \
   --memory=1g \
-  -p 0.0.0.0:3370:3370 \
+  -p 0.0.0.0:3370:3370 ${ADD_HOST_FLAG} \
   -v "${GRAFANA_DISK}":/var/lib/grafana \
-  -v "$(pwd)"/dev/grafana/${CONFIG_SUB_DIR}:/sg_config_grafana/provisioning/datasources \
+  -v "$(pwd)"/dev/grafana/all:/sg_config_grafana/provisioning/datasources \
   -v "$(pwd)"/docker-images/grafana/config/provisioning/dashboards:/sg_grafana_additional_dashboards \
-  -v "$(pwd)"/docker-images/grafana/jsonnet:/sg_grafana_additional_dashboards/legacy \
   -e DISABLE_SOURCEGRAPH_CONFIG="${DISABLE_SOURCEGRAPH_CONFIG:-'false'}" \
   ${IMAGE} >"${GRAFANA_LOG_FILE}" 2>&1 || finish
 

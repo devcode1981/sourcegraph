@@ -1,57 +1,62 @@
+import classNames from 'classnames'
 import * as H from 'history'
-import React, { useCallback, useEffect, useMemo } from 'react'
+import React, { useCallback, useContext, useEffect, useMemo } from 'react'
+import { EMPTY, from } from 'rxjs'
+import { switchMap } from 'rxjs/operators'
+
+import { wrapRemoteObservable } from '@sourcegraph/shared/src/api/client/api/common'
+import { ActivationProps } from '@sourcegraph/shared/src/components/activation/Activation'
+import { Link } from '@sourcegraph/shared/src/components/Link'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { VersionContextProps } from '@sourcegraph/shared/src/search/util'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
+
 import {
     PatternTypeProps,
-    InteractiveSearchProps,
     CaseSensitivityProps,
     CopyQueryButtonProps,
     RepogroupHomepageProps,
     OnboardingTourProps,
     HomePanelsProps,
     ShowQueryBuilderProps,
+    ParsedSearchQueryProps,
+    SearchContextProps,
 } from '..'
-import { ActivationProps } from '../../../../shared/src/components/activation/Activation'
-import { SettingsCascadeProps } from '../../../../shared/src/settings/settings'
-import { Settings } from '../../schema/settings.schema'
-import { ThemeProps } from '../../../../shared/src/theme'
-import { ThemePreferenceProps } from '../../theme'
-import { ExtensionsControllerProps } from '../../../../shared/src/extensions/controller'
-import { PlatformContextProps } from '../../../../shared/src/platform/context'
-import { Link } from '../../../../shared/src/components/Link'
-import { BrandLogo } from '../../components/branding/BrandLogo'
-import { VersionContextProps } from '../../../../shared/src/search/util'
-import { VersionContext } from '../../schema/site.schema'
-import { ViewGrid } from '../../repo/tree/ViewGrid'
-import { useObservable } from '../../../../shared/src/util/useObservable'
-import { getViewsForContainer } from '../../../../shared/src/api/client/services/viewService'
-import { isErrorLike } from '../../../../shared/src/util/errors'
-import { ContributableViewContainer } from '../../../../shared/src/api/protocol'
-import { EMPTY } from 'rxjs'
-import classNames from 'classnames'
-import { repogroupList, homepageLanguageList } from '../../repogroups/HomepageConfig'
-import { SearchPageInput } from './SearchPageInput'
-import { KeyboardShortcutsProps } from '../../keyboardShortcuts/keyboardShortcuts'
-import { PrivateCodeCta } from './PrivateCodeCta'
 import { AuthenticatedUser } from '../../auth'
-import { TelemetryProps } from '../../../../shared/src/telemetry/telemetryService'
-import { HomePanels } from '../panels/HomePanels'
-import { SearchPageFooter } from './SearchPageFooter'
+import { BrandLogo } from '../../components/branding/BrandLogo'
 import { SyntaxHighlightedSearchQuery } from '../../components/SyntaxHighlightedSearchQuery'
+import { InsightsApiContext, InsightsViewGrid } from '../../insights'
+import { KeyboardShortcutsProps } from '../../keyboardShortcuts/keyboardShortcuts'
+import { repogroupList, homepageLanguageList } from '../../repogroups/HomepageConfig'
+import { Settings } from '../../schema/settings.schema'
+import { VersionContext } from '../../schema/site.schema'
+import { ThemePreferenceProps } from '../../theme'
+import { HomePanels } from '../panels/HomePanels'
+
+import { PrivateCodeCta } from './PrivateCodeCta'
+import { SearchPageFooter } from './SearchPageFooter'
+import { SearchPageInput } from './SearchPageInput'
 
 export interface SearchPageProps
     extends SettingsCascadeProps<Settings>,
         ThemeProps,
         ThemePreferenceProps,
         ActivationProps,
+        Pick<ParsedSearchQueryProps, 'parsedSearchQuery'>,
         PatternTypeProps,
         CaseSensitivityProps,
         KeyboardShortcutsProps,
         TelemetryProps,
-        ExtensionsControllerProps<'executeCommand' | 'services'>,
+        ExtensionsControllerProps<'extHostAPI' | 'executeCommand'>,
         PlatformContextProps<'forceUpdateTooltip' | 'settings' | 'sourcegraphURL'>,
-        InteractiveSearchProps,
         CopyQueryButtonProps,
         VersionContextProps,
+        SearchContextProps,
         RepogroupHomepageProps,
         OnboardingTourProps,
         HomePanelsProps,
@@ -60,7 +65,7 @@ export interface SearchPageProps
     location: H.Location
     history: H.History
     isSourcegraphDotCom: boolean
-    setVersionContext: (versionContext: string | undefined) => void
+    setVersionContext: (versionContext: string | undefined) => Promise<void>
     availableVersionContexts: VersionContext[] | undefined
     autoFocus?: boolean
 
@@ -86,20 +91,23 @@ export const SearchPage: React.FunctionComponent<SearchPageProps> = props => {
 
     useEffect(() => props.telemetryService.logViewEvent('Home'), [props.telemetryService])
 
-    const codeInsightsEnabled =
-        !isErrorLike(props.settingsCascade.final) && !!props.settingsCascade.final?.experimentalFeatures?.codeInsights
+    const showCodeInsights =
+        !isErrorLike(props.settingsCascade.final) &&
+        !!props.settingsCascade.final?.experimentalFeatures?.codeInsights &&
+        props.settingsCascade.final['insights.displayLocation.homepage'] !== false
 
+    const { getCombinedViews } = useContext(InsightsApiContext)
     const views = useObservable(
         useMemo(
             () =>
-                codeInsightsEnabled
-                    ? getViewsForContainer(
-                          ContributableViewContainer.Homepage,
-                          {},
-                          props.extensionsController.services.view
+                showCodeInsights
+                    ? getCombinedViews(() =>
+                          from(props.extensionsController.extHostAPI).pipe(
+                              switchMap(extensionHostAPI => wrapRemoteObservable(extensionHostAPI.getHomepageViews({})))
+                          )
                       )
                     : EMPTY,
-            [codeInsightsEnabled, props.extensionsController.services.view]
+            [getCombinedViews, showCodeInsights, props.extensionsController]
         )
     )
     return (
@@ -113,7 +121,7 @@ export const SearchPage: React.FunctionComponent<SearchPageProps> = props => {
                 })}
             >
                 <SearchPageInput {...props} source="home" />
-                {views && <ViewGrid {...props} className="mt-5" views={views} />}
+                {views && <InsightsViewGrid {...props} className="mt-5" views={views} />}
             </div>
             {props.isSourcegraphDotCom &&
                 props.showRepogroupHomepage &&
@@ -133,6 +141,7 @@ export const SearchPage: React.FunctionComponent<SearchPageProps> = props => {
                                         <img
                                             className="search-page__repogroup-list-icon mr-2"
                                             src={repogroup.homepageIcon}
+                                            alt={`${repogroup.name} icon`}
                                         />
                                         <div className="d-flex flex-column">
                                             <Link

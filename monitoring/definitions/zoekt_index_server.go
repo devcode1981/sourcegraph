@@ -1,8 +1,6 @@
 package definitions
 
 import (
-	"fmt"
-
 	"github.com/sourcegraph/sourcegraph/monitoring/definitions/shared"
 	"github.com/sourcegraph/sourcegraph/monitoring/monitoring"
 )
@@ -21,10 +19,9 @@ func ZoektIndexServer() *monitoring.Container {
 							Name:              "average_resolve_revision_duration",
 							Description:       "average resolve revision duration over 5m",
 							Query:             `sum(rate(resolve_revision_seconds_sum[5m])) / sum(rate(resolve_revision_seconds_count[5m]))`,
-							DataMayNotExist:   true,
-							Warning:           monitoring.Alert().GreaterOrEqual(15),
-							Critical:          monitoring.Alert().GreaterOrEqual(30),
-							PanelOptions:      monitoring.PanelOptions().LegendFormat("{{duration}}").Unit(monitoring.Seconds),
+							Warning:           monitoring.Alert().GreaterOrEqual(15, nil),
+							Critical:          monitoring.Alert().GreaterOrEqual(30, nil),
+							Panel:             monitoring.Panel().LegendFormat("{{duration}}").Unit(monitoring.Seconds),
 							Owner:             monitoring.ObservableOwnerSearch,
 							PossibleSolutions: "none",
 						},
@@ -32,57 +29,47 @@ func ZoektIndexServer() *monitoring.Container {
 				},
 			},
 			{
-				Title:  "Container monitoring (not available on server)",
+				Title:  shared.TitleContainerMonitoring,
 				Hidden: true,
 				Rows: []monitoring.Row{
 					{
-						shared.ContainerCPUUsage("zoekt-indexserver", monitoring.ObservableOwnerSearch),
-						shared.ContainerMemoryUsage("zoekt-indexserver", monitoring.ObservableOwnerSearch),
+						shared.ContainerCPUUsage("zoekt-indexserver", monitoring.ObservableOwnerSearch).Observable(),
+						shared.ContainerMemoryUsage("zoekt-indexserver", monitoring.ObservableOwnerSearch).Observable(),
 					},
 					{
-						shared.ContainerRestarts("zoekt-indexserver", monitoring.ObservableOwnerSearch),
-						shared.ContainerFsInodes("zoekt-indexserver", monitoring.ObservableOwnerSearch),
-					},
-					{
-						{
-							Name:              "fs_io_operations",
-							Description:       "filesystem reads and writes rate by instance over 1h",
-							Query:             fmt.Sprintf(`sum by(name) (rate(container_fs_reads_total{%[1]s}[1h]) + rate(container_fs_writes_total{%[1]s}[1h]))`, shared.CadvisorNameMatcher("zoekt-indexserver")),
-							DataMayNotExist:   true,
-							Warning:           monitoring.Alert().GreaterOrEqual(5000),
-							PanelOptions:      monitoring.PanelOptions().LegendFormat("{{name}}"),
-							Owner:             monitoring.ObservableOwnerSearch,
-							PossibleSolutions: "none",
-						},
+						shared.ContainerMissing("zoekt-indexserver", monitoring.ObservableOwnerSearch).Observable(),
+						shared.ContainerIOUsage("zoekt-indexserver", monitoring.ObservableOwnerSearch).Observable(),
 					},
 				},
 			},
 			{
-				Title:  "Provisioning indicators (not available on server)",
+				Title:  shared.TitleProvisioningIndicators,
 				Hidden: true,
 				Rows: []monitoring.Row{
 					{
-						shared.ProvisioningCPUUsageLongTerm("zoekt-indexserver", monitoring.ObservableOwnerSearch),
-						shared.ProvisioningMemoryUsageLongTerm("zoekt-indexserver", monitoring.ObservableOwnerSearch),
+						shared.ProvisioningCPUUsageLongTerm("zoekt-indexserver", monitoring.ObservableOwnerSearch).Observable(),
+						shared.ProvisioningMemoryUsageLongTerm("zoekt-indexserver", monitoring.ObservableOwnerSearch).Observable(),
 					},
 					{
-						shared.ProvisioningCPUUsageShortTerm("zoekt-indexserver", monitoring.ObservableOwnerSearch),
-						shared.ProvisioningMemoryUsageShortTerm("zoekt-indexserver", monitoring.ObservableOwnerSearch),
+						shared.ProvisioningCPUUsageShortTerm("zoekt-indexserver", monitoring.ObservableOwnerSearch).Observable(),
+						shared.ProvisioningMemoryUsageShortTerm("zoekt-indexserver", monitoring.ObservableOwnerSearch).Observable(),
 					},
 				},
 			},
 			{
-				Title:  "Kubernetes monitoring (ignore if using Docker Compose or server)",
+				Title:  shared.TitleKubernetesMonitoring,
 				Hidden: true,
 				Rows: []monitoring.Row{
 					{
 						// zoekt_index_server, zoekt_web_server are deployed together
 						// as part of the indexed-search service, so only show pod
 						// availability here.
-						shared.KubernetesPodsAvailable("indexed-search", monitoring.ObservableOwnerSearch),
+						shared.KubernetesPodsAvailable("indexed-search", monitoring.ObservableOwnerSearch).Observable(),
 					},
 				},
 			},
 		},
+
+		NoSourcegraphDebugServer: true,
 	}
 }

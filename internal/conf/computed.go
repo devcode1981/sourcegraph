@@ -144,7 +144,7 @@ func DeployType() string {
 	if e := os.Getenv("DEPLOY_TYPE"); e != "" {
 		return e
 	}
-	// Default to Kubernetes cluster so that every Kubernetes c
+	// Default to Kubernetes cluster so that every Kubernetes
 	// cluster deployment doesn't need to be configured with DEPLOY_TYPE.
 	return DeployKubernetes
 }
@@ -219,8 +219,41 @@ func SearchIndexEnabled() bool {
 	return DeployType() != DeploySingleDocker
 }
 
-func CampaignsEnabled() bool {
-	if enabled := Get().CampaignsEnabled; enabled != nil {
+func BatchChangesEnabled() bool {
+	// TODO(campaigns-deprecation): This check can be removed once we remove
+	// the deprecated site-config settings.
+	if deprecated := Get().CampaignsEnabled; deprecated != nil {
+		return *deprecated
+	}
+
+	if enabled := Get().BatchChangesEnabled; enabled != nil {
+		return *enabled
+	}
+	return true
+}
+
+func BatchChangesRestrictedToAdmins() bool {
+	// TODO(campaigns-deprecation): This check can be removed once we remove
+	// the deprecated site-config settings.
+	if deprecated := Get().CampaignsRestrictToAdmins; deprecated != nil {
+		return *deprecated
+	}
+
+	if restricted := Get().BatchChangesRestrictToAdmins; restricted != nil {
+		return *restricted
+	}
+	return false
+}
+
+func CodeIntelAutoIndexingEnabled() bool {
+	if enabled := Get().CodeIntelAutoIndexingEnabled; enabled != nil {
+		return *enabled
+	}
+	return false
+}
+
+func ProductResearchPageEnabled() bool {
+	if enabled := Get().ProductResearchPageEnabled; enabled != nil {
 		return *enabled
 	}
 	return true
@@ -260,12 +293,12 @@ func SearchSymbolsParallelism() int {
 }
 
 func BitbucketServerPluginPerm() bool {
-	val := Get().ExperimentalFeatures.BitbucketServerFastPerm
+	val := ExperimentalFeatures().BitbucketServerFastPerm
 	return val == "enabled"
 }
 
 func EventLoggingEnabled() bool {
-	val := Get().ExperimentalFeatures.EventLogging
+	val := ExperimentalFeatures().EventLogging
 	if val == "" {
 		return true
 	}
@@ -273,7 +306,7 @@ func EventLoggingEnabled() bool {
 }
 
 func StructuralSearchEnabled() bool {
-	val := Get().ExperimentalFeatures.StructuralSearch
+	val := ExperimentalFeatures().StructuralSearch
 	if val == "" {
 		return true
 	}
@@ -281,11 +314,11 @@ func StructuralSearchEnabled() bool {
 }
 
 func AndOrQueryEnabled() bool {
-	e := Get().ExperimentalFeatures
-	if e == nil || e.AndOrQuery == "" {
+	val := ExperimentalFeatures().AndOrQuery
+	if val == "" {
 		return true
 	}
-	return e.AndOrQuery == "enabled"
+	return val == "enabled"
 }
 
 func ExperimentalFeatures() schema.ExperimentalFeatures {
@@ -327,8 +360,9 @@ const (
 	ExternalServiceModeAll      ExternalServiceMode = 2
 )
 
-// ExternalServiceUserMode returns the mode describing if users are allowed to add external services
-// for public and private repositories.
+// ExternalServiceUserMode returns the site level mode describing if users are
+// allowed to add external services for public and private repositories. It does
+// NOT take into account permissions granted to the current user.
 func ExternalServiceUserMode() ExternalServiceMode {
 	switch Get().ExternalServiceUserMode {
 	case "public":
@@ -338,4 +372,31 @@ func ExternalServiceUserMode() ExternalServiceMode {
 	default:
 		return ExternalServiceModeDisabled
 	}
+}
+
+// GitMaxCodehostRequestsPerSecond returns maximum number of remote code host
+// git operations to be run per second per gitserver. If not set, it returns the
+// default value -1.
+func GitMaxCodehostRequestsPerSecond() int {
+	val := Get().GitMaxCodehostRequestsPerSecond
+	if val == nil || *val < -1 {
+		return -1
+	}
+	return *val
+}
+
+func UserReposMaxPerUser() int {
+	v := Get().UserReposMaxPerUser
+	if v == 0 {
+		return 2000
+	}
+	return v
+}
+
+func UserReposMaxPerSite() int {
+	v := Get().UserReposMaxPerSite
+	if v == 0 {
+		return 200000
+	}
+	return v
 }

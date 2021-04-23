@@ -34,7 +34,7 @@
           "default": true
         },
         "requestsPerHour": {
-          "description": "Requests per hour permitted. This is an average, calculated per second.",
+          "description": "Requests per hour permitted. This is an average, calculated per second. Internally, the burst limit is set to 500, which implies that for a requests per hour limit as low as 1, users will continue to be able to send a maximum of 500 requests immediately, provided that the complexity cost of each request is 1.",
           "type": "number",
           "default": 28800,
           "minimum": 0
@@ -57,7 +57,7 @@
       "examples": ["https://bitbucket.example.com"]
     },
     "token": {
-      "description": "A Bitbucket Server personal access token with Read permissions. When using campaigns, the token needs Write permissions. Create one at https://[your-bitbucket-hostname]/plugins/servlet/access-tokens/add. Also set the corresponding \"username\" field.\n\nFor Bitbucket Server instances that don't support personal access tokens (Bitbucket Server version 5.4 and older), specify user-password credentials in the \"username\" and \"password\" fields.",
+      "description": "A Bitbucket Server personal access token with Read permissions. When using batch changes, the token needs Write permissions. Create one at https://[your-bitbucket-hostname]/plugins/servlet/access-tokens/add. Also set the corresponding \"username\" field.\n\nFor Bitbucket Server instances that don't support personal access tokens (Bitbucket Server version 5.4 and older), specify user-password credentials in the \"username\" and \"password\" fields.",
       "type": "string",
       "minLength": 1
     },

@@ -1,7 +1,8 @@
-import React from 'react'
-import { Toggle } from './Toggle'
 import { mount } from 'enzyme'
+import React from 'react'
 import sinon from 'sinon'
+
+import { Toggle } from './Toggle'
 
 describe('Toggle', () => {
     test('value is false', () => {
@@ -22,4 +23,9 @@ describe('Toggle', () => {
     })
 
     test('className', () => expect(mount(<Toggle className="c" />)).toMatchSnapshot())
+
+    test('aria', () =>
+        expect(
+            mount(<Toggle aria-describedby="test-id-1" aria-labelledby="test-id-2" aria-label="test toggle" />)
+        ).toMatchSnapshot())
 })

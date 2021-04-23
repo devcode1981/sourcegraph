@@ -1,28 +1,34 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import AlertCircleIcon from 'mdi-react/AlertCircleIcon'
 import MapSearchIcon from 'mdi-react/MapSearchIcon'
 import * as React from 'react'
 import { Route, RouteComponentProps, Switch } from 'react-router'
 import { combineLatest, merge, Observable, of, Subject, Subscription } from 'rxjs'
 import { catchError, distinctUntilChanged, map, mapTo, startWith, switchMap } from 'rxjs/operators'
-import { ConfiguredRegistryExtension, toConfiguredRegistryExtension } from '../../../../shared/src/extensions/extension'
-import { gql } from '../../../../shared/src/graphql/graphql'
-import * as GQL from '../../../../shared/src/graphql/schema'
-import { PlatformContextProps } from '../../../../shared/src/platform/context'
-import { SettingsCascadeProps } from '../../../../shared/src/settings/settings'
-import { createAggregateError, ErrorLike, isErrorLike, asError } from '../../../../shared/src/util/errors'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import {
+    ConfiguredRegistryExtension,
+    splitExtensionID,
+    toConfiguredRegistryExtension,
+} from '@sourcegraph/shared/src/extensions/extension'
+import { gql } from '@sourcegraph/shared/src/graphql/graphql'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { createAggregateError, ErrorLike, isErrorLike, asError } from '@sourcegraph/shared/src/util/errors'
+
+import { AuthenticatedUser } from '../../auth'
 import { queryGraphQL } from '../../backend/graphql'
+import { ErrorMessage } from '../../components/alerts'
+import { BreadcrumbSetters } from '../../components/Breadcrumbs'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { HeroPage } from '../../components/HeroPage'
 import { RouteDescriptor } from '../../util/contributions'
 import { ExtensionsAreaRouteContext } from '../ExtensionsArea'
+
 import { ExtensionAreaHeader, ExtensionAreaHeaderNavItem } from './ExtensionAreaHeader'
-import { ThemeProps } from '../../../../shared/src/theme'
-import { ErrorMessage } from '../../components/alerts'
-import { TelemetryProps } from '../../../../shared/src/telemetry/telemetryService'
-import { AuthenticatedUser } from '../../auth'
-import { BreadcrumbSetters } from '../../components/Breadcrumbs'
-import { splitExtensionID } from './extension'
 
 export const registryExtensionFragment = gql`
     fragment RegistryExtensionFields on RegistryExtension {
@@ -189,7 +195,7 @@ export class ExtensionArea extends React.Component<ExtensionAreaProps> {
                 <HeroPage
                     icon={AlertCircleIcon}
                     title="Error"
-                    subtitle={<ErrorMessage error={this.state.extensionOrError} history={this.props.history} />}
+                    subtitle={<ErrorMessage error={this.state.extensionOrError} />}
                 />
             )
         }
@@ -214,7 +220,7 @@ export class ExtensionArea extends React.Component<ExtensionAreaProps> {
                     {...this.props}
                     {...context}
                     navItems={this.props.extensionAreaHeaderNavItems}
-                    className="border-bottom mt-4"
+                    className="border-bottom"
                 />
                 <div className="container pt-3">
                     <ErrorBoundary location={this.props.location}>

@@ -1,19 +1,20 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
-import { decode } from 'he'
-import { escapeRegExp, isEqual, range } from 'lodash'
+import * as H from 'history'
+import { isEqual, range } from 'lodash'
 import React from 'react'
 import { Link } from 'react-router-dom'
 import VisibilitySensor from 'react-visibility-sensor'
 import { combineLatest, of, Subject, Subscription } from 'rxjs'
 import { catchError, distinctUntilChanged, filter, switchMap } from 'rxjs/operators'
 import sanitizeHtml from 'sanitize-html'
-import { Markdown } from '../../../shared/src/components/Markdown'
-import * as GQL from '../../../shared/src/graphql/schema'
-import { highlightNode } from '../../../shared/src/util/dom'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { Markdown } from '@sourcegraph/shared/src/components/Markdown'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { highlightNode } from '@sourcegraph/shared/src/util/dom'
+import { renderMarkdown } from '@sourcegraph/shared/src/util/markdown'
+
 import { highlightCode } from '../search/backend'
-import { ThemeProps } from '../../../shared/src/theme'
-import * as H from 'history'
-import { renderMarkdown } from '../../../shared/src/util/markdown'
 
 interface SearchResultMatchProps extends ThemeProps {
     item: GQL.ISearchResultMatch
@@ -57,9 +58,11 @@ export class SearchResultMatch extends React.Component<SearchResultMatchProps, S
                     filter(([, isVisible]) => isVisible),
                     distinctUntilChanged((a, b) => isEqual(a, b)),
                     switchMap(([props]) => {
-                        const markdownHTML = props.item.body.html
-                            ? sanitizeHtml(props.item.body.html)
-                            : renderMarkdown(props.item.body.text)
+                        const markdownHTML = sanitizeHtml(
+                            props.item.body.html || renderMarkdown(props.item.body.text),
+                            // This is already going to be rendered inside a <code> tag so remove any extra <code> inside
+                            { allowedTags: sanitizeHtml.defaults.allowedTags.filter(tag => tag !== 'code') }
+                        )
                         if (this.bodyIsCode()) {
                             const lang = this.getLanguage() || 'txt'
                             const parser = new DOMParser()
@@ -67,7 +70,6 @@ export class SearchResultMatch extends React.Component<SearchResultMatchProps, S
                             const codeContent =
                                 parser.parseFromString(markdownHTML, 'text/html').body.textContent?.trim() || ''
                             // Match the code content and any trailing newlines if any.
-                            const codeContentAndAnyNewLines = new RegExp(escapeRegExp(codeContent) + '\\n*')
                             if (codeContent) {
                                 return highlightCode({
                                     code: codeContent,
@@ -75,15 +77,11 @@ export class SearchResultMatch extends React.Component<SearchResultMatchProps, S
                                     disableTimeout: false,
                                     isLightTheme: props.isLightTheme,
                                 }).pipe(
-                                    switchMap(highlightedString => {
-                                        const highlightedMarkdown = decode(markdownHTML).replace(
-                                            codeContentAndAnyNewLines,
-                                            highlightedString
-                                        )
-                                        return of(highlightedMarkdown)
-                                    }),
                                     // Return the rendered markdown if highlighting fails.
-                                    catchError(() => of(markdownHTML))
+                                    catchError(error => {
+                                        console.log(error)
+                                        return of(markdownHTML)
+                                    })
                                 )
                             }
                         }

@@ -1,19 +1,22 @@
 import classNames from 'classnames'
 import * as H from 'history'
 import * as React from 'react'
-import { ActionNavItemsClassProps, ActionsNavItems } from '../../../../shared/src/actions/ActionsNavItems'
-import { ContributionScope } from '../../../../shared/src/api/client/context/context'
-import { ContributableMenu } from '../../../../shared/src/api/protocol'
-import { ExtensionsControllerProps } from '../../../../shared/src/extensions/controller'
-import { PlatformContextProps } from '../../../../shared/src/platform/context'
-import { TelemetryProps } from '../../../../shared/src/telemetry/telemetryService'
+
+import { ActionNavItemsClassProps, ActionsNavItems } from '@sourcegraph/shared/src/actions/ActionsNavItems'
+import { ContributionScope } from '@sourcegraph/shared/src/api/extension/api/context/context'
+import { ContributableMenu } from '@sourcegraph/shared/src/api/protocol'
+import { isHTTPAuthError } from '@sourcegraph/shared/src/backend/fetch'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+
 import { DiffOrBlobInfo, FileInfoWithContent } from '../code-hosts/shared/codeHost'
+import { SignInButton } from '../code-hosts/shared/SignInButton'
+import { defaultRevisionToCommitID } from '../code-hosts/shared/util/fileInfo'
+
 import { OpenDiffOnSourcegraph } from './OpenDiffOnSourcegraph'
 import { OpenOnSourcegraph } from './OpenOnSourcegraph'
-import { SignInButton } from '../code-hosts/shared/SignInButton'
-import { ErrorLike, isErrorLike } from '../../../../shared/src/util/errors'
-import { isHTTPAuthError } from '../../../../shared/src/backend/fetch'
-import { defaultRevisionToCommitID } from '../code-hosts/shared/util/fileInfo'
 
 export interface ButtonProps {
     className?: string
@@ -46,19 +49,22 @@ export interface CodeViewToolbarProps
     buttonProps?: ButtonProps
     onSignInClose: () => void
     location: H.Location
+    hideActions?: boolean
 }
 
 export const CodeViewToolbar: React.FunctionComponent<CodeViewToolbarProps> = props => (
     <ul className={classNames('code-view-toolbar', props.className)}>
-        <ActionsNavItems
-            {...props}
-            listItemClass={classNames('code-view-toolbar__item', props.listItemClass)}
-            menu={ContributableMenu.EditorTitle}
-            extensionsController={props.extensionsController}
-            platformContext={props.platformContext}
-            location={props.location}
-            scope={props.scope}
-        />{' '}
+        {!props.hideActions && (
+            <ActionsNavItems
+                {...props}
+                listItemClass={classNames('code-view-toolbar__item', props.listItemClass)}
+                menu={ContributableMenu.EditorTitle}
+                extensionsController={props.extensionsController}
+                platformContext={props.platformContext}
+                location={props.location}
+                scope={props.scope}
+            />
+        )}{' '}
         {isErrorLike(props.fileInfoOrError) ? (
             isHTTPAuthError(props.fileInfoOrError) ? (
                 <SignInButton

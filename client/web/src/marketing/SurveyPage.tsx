@@ -1,19 +1,22 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import * as H from 'history'
+import TwitterIcon from 'mdi-react/TwitterIcon'
 import * as React from 'react'
 import { RouteComponentProps } from 'react-router'
+import { Subscription } from 'rxjs'
 import { catchError } from 'rxjs/operators'
+
+import { Form } from '@sourcegraph/branded/src/components/Form'
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+
+import { AuthenticatedUser } from '../auth'
 import { FeedbackText } from '../components/FeedbackText'
-import { Form } from '../../../branded/src/components/Form'
 import { HeroPage } from '../components/HeroPage'
 import { PageTitle } from '../components/PageTitle'
 import { eventLogger } from '../tracking/eventLogger'
+
 import { submitSurvey } from './backend'
 import { SurveyCTA } from './SurveyToast'
-import { Subscription } from 'rxjs'
-import { ThemeProps } from '../../../shared/src/theme'
-import TwitterIcon from 'mdi-react/TwitterIcon'
-import { AuthenticatedUser } from '../auth'
 
 interface SurveyFormProps {
     location: H.Location
@@ -56,10 +59,17 @@ class SurveyForm extends React.Component<SurveyFormProps, SurveyFormState> {
         return (
             <Form className="survey-form" onSubmit={this.handleSubmit}>
                 {this.state.error && <p className="survey-form__error">{this.state.error.message}</p>}
-                <label className="survey-form__label">
+                {/* Label is associated with control through aria-labelledby */}
+                {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
+                <label id="survey-form-scores" className="survey-form__label">
                     How likely is it that you would recommend Sourcegraph to a friend?
                 </label>
-                <SurveyCTA className="survey-form__scores" onClick={this.onScoreChange} score={this.props.score} />
+                <SurveyCTA
+                    ariaLabelledby="survey-form-scores"
+                    className="survey-form__scores"
+                    onChange={this.onScoreChange}
+                    score={this.props.score}
+                />
                 {!this.props.authenticatedUser && (
                     <div className="form-group">
                         <input
@@ -73,10 +83,11 @@ class SurveyForm extends React.Component<SurveyFormProps, SurveyFormState> {
                     </div>
                 )}
                 <div className="form-group">
-                    <label className="survey-form__label">
+                    <label className="survey-form__label" htmlFor="survey-form-score-reason">
                         What is the most important reason for the score you gave Sourcegraph?
                     </label>
                     <textarea
+                        id="survey-form-score-reason"
                         className="form-control survey-form__input"
                         onChange={this.onReasonFieldChange}
                         value={this.state.reason}
@@ -85,8 +96,11 @@ class SurveyForm extends React.Component<SurveyFormProps, SurveyFormState> {
                     />
                 </div>
                 <div className="form-group">
-                    <label className="survey-form__label">What could Sourcegraph do to provide a better product?</label>
+                    <label className="survey-form__label" htmlFor="survey-form-better-product">
+                        What could Sourcegraph do to provide a better product?
+                    </label>
                     <textarea
+                        id="survey-form-better-product"
                         className="form-control survey-form__input"
                         onChange={this.onBetterProductFieldChange}
                         value={this.state.betterProduct}

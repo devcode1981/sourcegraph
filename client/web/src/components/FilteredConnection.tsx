@@ -1,4 +1,4 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import classNames from 'classnames'
 import * as H from 'history'
 import { uniq } from 'lodash'
 import * as React from 'react'
@@ -18,12 +18,15 @@ import {
     scan,
     share,
 } from 'rxjs/operators'
-import { asError, ErrorLike, isErrorLike } from '../../../shared/src/util/errors'
-import { pluralize } from '../../../shared/src/util/strings'
-import { Form } from '../../../branded/src/components/Form'
+
+import { Form } from '@sourcegraph/branded/src/components/Form'
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { Scalars } from '@sourcegraph/shared/src/graphql-operations'
+import { asError, ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { pluralize } from '@sourcegraph/shared/src/util/strings'
+import { hasProperty } from '@sourcegraph/shared/src/util/types'
+
 import { ErrorMessage } from './alerts'
-import { hasProperty } from '../../../shared/src/util/types'
-import { Scalars } from '../../../shared/src/graphql-operations'
 
 /** Checks if the passed value satisfies the GraphQL Node interface */
 const hasID = (value: unknown): value is { id: Scalars['ID'] } =>
@@ -145,10 +148,14 @@ interface ConnectionDisplayProps {
  *
  * @template N The node type of the GraphQL connection, such as GQL.IRepository (if the connection is GQL.IRepositoryConnection)
  * @template NP Props passed to `nodeComponent` in addition to `{ node: N }`
+ * @template HP Props passed to `headComponent` in addition to `{ nodes: N[]; totalCount?: number | null }`.
  */
-interface ConnectionPropsCommon<N, NP = {}> extends ConnectionDisplayProps {
+interface ConnectionPropsCommon<N, NP = {}, HP = {}> extends ConnectionDisplayProps {
     /** Header row to appear above all nodes. */
-    headComponent?: React.ComponentType<{ nodes: N[]; totalCount?: number | null }>
+    headComponent?: React.ComponentType<{ nodes: N[]; totalCount?: number | null } & HP>
+
+    /** Props to pass to each headComponent in addition to `{ nodes: N[]; totalCount?: number | null }`. */
+    headComponentProps?: HP
 
     /** Footer row to appear below all nodes. */
     footComponent?: React.ComponentType<{ nodes: N[] }>
@@ -188,8 +195,8 @@ interface ConnectionStateCommon {
     loading: boolean
 }
 
-interface ConnectionNodesProps<C extends Connection<N>, N, NP = {}>
-    extends ConnectionPropsCommon<N, NP>,
+interface ConnectionNodesProps<C extends Connection<N>, N, NP = {}, HP = {}>
+    extends ConnectionPropsCommon<N, NP, HP>,
         ConnectionStateCommon {
     /** The fetched connection data or an error (if an error occurred). */
     connection: C
@@ -199,7 +206,9 @@ interface ConnectionNodesProps<C extends Connection<N>, N, NP = {}>
     onShowMore: () => void
 }
 
-class ConnectionNodes<C extends Connection<N>, N, NP = {}> extends React.PureComponent<ConnectionNodesProps<C, N, NP>> {
+class ConnectionNodes<C extends Connection<N>, N, NP = {}, HP = {}> extends React.PureComponent<
+    ConnectionNodesProps<C, N, NP, HP>
+> {
     public render(): JSX.Element | null {
         const NodeComponent = this.props.nodeComponent
         const ListComponent = this.props.listComponent || 'ul'
@@ -207,42 +216,35 @@ class ConnectionNodes<C extends Connection<N>, N, NP = {}> extends React.PureCom
         const FootComponent = this.props.footComponent
         const TotalCountSummaryComponent = this.props.totalCountSummaryComponent
 
-        const hasNextPage = this.props.connection
-            ? this.props.connection.pageInfo
-                ? this.props.connection.pageInfo.hasNextPage
-                : typeof this.props.connection.totalCount === 'number' &&
-                  this.props.connection.nodes.length < this.props.connection.totalCount
-            : false
+        const hasNextPage = this.props.connection.pageInfo
+            ? this.props.connection.pageInfo.hasNextPage
+            : typeof this.props.connection.totalCount === 'number' &&
+              this.props.connection.nodes.length < this.props.connection.totalCount
 
         let totalCount: number | null = null
-        if (this.props.connection) {
-            if (typeof this.props.connection.totalCount === 'number') {
-                totalCount = this.props.connection.totalCount
-            } else if (
-                // TODO(sqs): this line below is wrong because this.props.first might've just been changed and
-                // this.props.connection.nodes is still the data fetched from before this.props.first was changed.
-                // this causes the UI to incorrectly show "N items total" even when the count is indeterminate right
-                // after the user clicks "Show more" but before the new data is loaded.
-                this.props.connection.nodes.length < this.props.first ||
-                (this.props.connection.nodes.length === this.props.first &&
-                    this.props.connection.pageInfo &&
-                    typeof this.props.connection.pageInfo.hasNextPage === 'boolean' &&
-                    !this.props.connection.pageInfo.hasNextPage)
-            ) {
-                totalCount = this.props.connection.nodes.length
-            }
+        if (typeof this.props.connection.totalCount === 'number') {
+            totalCount = this.props.connection.totalCount
+        } else if (
+            // TODO(sqs): this line below is wrong because this.props.first might've just been changed and
+            // this.props.connection.nodes is still the data fetched from before this.props.first was changed.
+            // this causes the UI to incorrectly show "N items total" even when the count is indeterminate right
+            // after the user clicks "Show more" but before the new data is loaded.
+            this.props.connection.nodes.length < this.props.first ||
+            (this.props.connection.nodes.length === this.props.first &&
+                this.props.connection.pageInfo &&
+                typeof this.props.connection.pageInfo.hasNextPage === 'boolean' &&
+                !this.props.connection.pageInfo.hasNextPage)
+        ) {
+            totalCount = this.props.connection.nodes.length
         }
 
         let summary: React.ReactFragment | undefined
-        if (
-            this.props.connection &&
-            (!this.props.noSummaryIfAllNodesVisible || this.props.connection.nodes.length === 0 || hasNextPage)
-        ) {
+        if (!this.props.noSummaryIfAllNodesVisible || this.props.connection.nodes.length === 0 || hasNextPage) {
             if (totalCount !== null && totalCount > 0) {
                 summary = TotalCountSummaryComponent ? (
                     <TotalCountSummaryComponent totalCount={totalCount} />
                 ) : (
-                    <p className="filtered-connection__summary">
+                    <p className="filtered-connection__summary" data-testid="summary">
                         <small>
                             <span>
                                 {totalCount} {pluralize(this.props.noun, totalCount, this.props.pluralNoun)}{' '}
@@ -264,7 +266,7 @@ class ConnectionNodes<C extends Connection<N>, N, NP = {}> extends React.PureCom
                 // No total count to show, but it will show a 'Show more' button.
             } else if (totalCount === 0) {
                 summary = this.props.emptyElement || (
-                    <p className="filtered-connection__summary">
+                    <p className="filtered-connection__summary" data-testid="summary">
                         <small>
                             No {this.props.pluralNoun}{' '}
                             {this.props.connectionQuery && (
@@ -285,12 +287,16 @@ class ConnectionNodes<C extends Connection<N>, N, NP = {}> extends React.PureCom
         return (
             <>
                 {this.props.connectionQuery && summary}
-                {this.props.connection && this.props.connection.nodes.length > 0 && (
-                    <ListComponent className={`filtered-connection__nodes ${this.props.listClassName || ''}`}>
+                {this.props.connection.nodes.length > 0 && (
+                    <ListComponent
+                        className={classNames('filtered-connection__nodes', this.props.listClassName)}
+                        data-testid="nodes"
+                    >
                         {HeadComponent && (
                             <HeadComponent
                                 nodes={this.props.connection.nodes}
                                 totalCount={this.props.connection.totalCount}
+                                {...this.props.headComponentProps!}
                             />
                         )}
                         {ListComponent === 'table' ? <tbody>{nodes}</tbody> : nodes}
@@ -298,12 +304,13 @@ class ConnectionNodes<C extends Connection<N>, N, NP = {}> extends React.PureCom
                     </ListComponent>
                 )}
                 {!this.props.connectionQuery && summary}
-                {!this.props.loading && !this.props.noShowMore && this.props.connection && hasNextPage && (
+                {!this.props.loading && !this.props.noShowMore && hasNextPage && (
                     <button
                         type="button"
-                        className={`btn btn-secondary btn-sm filtered-connection__show-more ${
-                            this.props.showMoreClassName || ''
-                        }`}
+                        className={classNames(
+                            'btn btn-secondary btn-sm filtered-connection__show-more',
+                            this.props.showMoreClassName
+                        )}
                         onClick={this.onClickShowMore}
                     >
                         Show more
@@ -315,6 +322,8 @@ class ConnectionNodes<C extends Connection<N>, N, NP = {}> extends React.PureCom
 
     private onClickShowMore = (): void => this.props.onShowMore()
 }
+
+export const ConnectionNodesForTesting = ConnectionNodes
 
 /**
  * Fields that belong in FilteredConnectionProps and that don't depend on the type parameters. These are the fields
@@ -348,6 +357,9 @@ interface FilteredConnectionDisplayProps extends ConnectionDisplayProps {
     /** Hides the filter input field. */
     hideSearch?: boolean
 
+    /** Hides filters and search when the list of nodes is empty  */
+    hideControlsWhenEmpty?: boolean
+
     /** Autofocuses the filter input field. */
     autoFocus?: boolean
 
@@ -369,6 +381,9 @@ interface FilteredConnectionDisplayProps extends ConnectionDisplayProps {
 
     /** Called when a filter is selected and on initial render. */
     onValueSelect?: (filter: FilteredConnectionFilter, value: FilterValue) => void
+
+    /** CSS class name for the <input> element */
+    inputClassName?: string
 }
 
 /**
@@ -377,15 +392,16 @@ interface FilteredConnectionDisplayProps extends ConnectionDisplayProps {
  * @template C The GraphQL connection type, such as GQL.IRepositoryConnection.
  * @template N The node type of the GraphQL connection, such as GQL.IRepository (if C is GQL.IRepositoryConnection)
  * @template NP Props passed to `nodeComponent` in addition to `{ node: N }`
+ * @template HP Props passed to `headComponent` in addition to `{ nodes: N[]; totalCount?: number | null }`.
  */
-interface FilteredConnectionProps<C extends Connection<N>, N, NP = {}>
-    extends ConnectionPropsCommon<N, NP>,
+interface FilteredConnectionProps<C extends Connection<N>, N, NP = {}, HP = {}>
+    extends ConnectionPropsCommon<N, NP, HP>,
         FilteredConnectionDisplayProps {
     /** Called to fetch the connection data to populate this component. */
     queryConnection: (args: FilteredConnectionQueryArguments) => Observable<C>
 
     /** Called when the queryConnection Observable emits. */
-    onUpdate?: (value: C | ErrorLike | undefined) => void
+    onUpdate?: (value: C | ErrorLike | undefined, query: string) => void
 }
 
 /**
@@ -476,12 +492,15 @@ const QUERY_KEY = 'query'
  *
  * @template N The node type of the GraphQL connection, such as `GQL.IRepository` (if `C` is `GQL.IRepositoryConnection`)
  * @template NP Props passed to `nodeComponent` in addition to `{ node: N }`
+ * @template HP Props passed to `headComponent` in addition to `{ nodes: N[]; totalCount?: number | null }`.
  * @template C The GraphQL connection type, such as `GQL.IRepositoryConnection`.
  */
-export class FilteredConnection<N, NP = {}, C extends Connection<N> = Connection<N>> extends React.PureComponent<
-    FilteredConnectionProps<C, N, NP>,
-    FilteredConnectionState<C, N>
-> {
+export class FilteredConnection<
+    N,
+    NP = {},
+    HP = {},
+    C extends Connection<N> = Connection<N>
+> extends React.PureComponent<FilteredConnectionProps<C, N, NP, HP>, FilteredConnectionState<C, N>> {
     public static defaultProps: Partial<FilteredConnectionProps<any, any>> = {
         defaultFirst: 20,
         useURLQuery: true,
@@ -490,12 +509,12 @@ export class FilteredConnection<N, NP = {}, C extends Connection<N> = Connection
     private queryInputChanges = new Subject<string>()
     private activeValuesChanges = new Subject<Map<string, FilterValue>>()
     private showMoreClicks = new Subject<void>()
-    private componentUpdates = new Subject<FilteredConnectionProps<C, N, NP>>()
+    private componentUpdates = new Subject<FilteredConnectionProps<C, N, NP, HP>>()
     private subscriptions = new Subscription()
 
     private filterRef: HTMLInputElement | null = null
 
-    constructor(props: FilteredConnectionProps<C, N, NP>) {
+    constructor(props: FilteredConnectionProps<C, N, NP, HP>) {
         super(props)
 
         const searchParameters = new URLSearchParams(this.props.location.search)
@@ -677,7 +696,7 @@ export class FilteredConnection<N, NP = {}, C extends Connection<N> = Connection
                             }
                         }
                         if (this.props.onUpdate) {
-                            this.props.onUpdate(connectionOrError)
+                            this.props.onUpdate(connectionOrError, this.state.query)
                         }
                         this.setState({ connectionOrError, ...rest })
                     },
@@ -818,50 +837,61 @@ export class FilteredConnection<N, NP = {}, C extends Connection<N> = Connection
             errors.push(this.state.connectionOrError.error)
         }
 
+        // const shouldShowControls =
+        //     this.state.connectionOrError &&
+        //     !isErrorLike(this.state.connectionOrError) &&
+        //     this.state.connectionOrError.nodes &&
+        //     this.state.connectionOrError.nodes.length > 0 &&
+        //     this.props.hideControlsWhenEmpty
+
         const compactnessClass = `filtered-connection--${this.props.compact ? 'compact' : 'noncompact'}`
         return (
             <div
-                className={`filtered-connection test-filtered-connection ${compactnessClass} ${
-                    this.props.className || ''
-                }`}
-            >
-                {(!this.props.hideSearch || this.props.filters) && (
-                    <Form
-                        className="w-100 d-inline-flex justify-content-between flex-row filtered-connection__form"
-                        onSubmit={this.onSubmit}
-                    >
-                        {this.props.filters && (
-                            <FilteredConnectionFilterControl
-                                filters={this.props.filters}
-                                onDidSelectValue={this.onDidSelectValue}
-                                values={this.state.activeValues}
-                            >
-                                {this.props.additionalFilterElement}
-                            </FilteredConnectionFilterControl>
-                        )}
-                        {!this.props.hideSearch && (
-                            <input
-                                className="form-control filtered-connection__filter"
-                                type="search"
-                                placeholder={`Search ${this.props.pluralNoun}...`}
-                                name="query"
-                                value={this.state.query}
-                                onChange={this.onChange}
-                                autoFocus={this.props.autoFocus}
-                                autoComplete="off"
-                                autoCorrect="off"
-                                autoCapitalize="off"
-                                ref={this.setFilterRef}
-                                spellCheck={false}
-                            />
-                        )}
-                    </Form>
+                className={classNames(
+                    'filtered-connection test-filtered-connection',
+                    compactnessClass,
+                    this.props.className
                 )}
+            >
+                {
+                    /* shouldShowControls && */ (!this.props.hideSearch || this.props.filters) && (
+                        <Form
+                            className="w-100 d-inline-flex justify-content-between flex-row filtered-connection__form"
+                            onSubmit={this.onSubmit}
+                        >
+                            {this.props.filters && (
+                                <FilteredConnectionFilterControl
+                                    filters={this.props.filters}
+                                    onDidSelectValue={this.onDidSelectValue}
+                                    values={this.state.activeValues}
+                                >
+                                    {this.props.additionalFilterElement}
+                                </FilteredConnectionFilterControl>
+                            )}
+                            {!this.props.hideSearch && (
+                                <input
+                                    className={classNames('form-control', this.props.inputClassName)}
+                                    type="search"
+                                    placeholder={`Search ${this.props.pluralNoun}...`}
+                                    name="query"
+                                    value={this.state.query}
+                                    onChange={this.onChange}
+                                    autoFocus={this.props.autoFocus}
+                                    autoComplete="off"
+                                    autoCorrect="off"
+                                    autoCapitalize="off"
+                                    ref={this.setFilterRef}
+                                    spellCheck={false}
+                                />
+                            )}
+                        </Form>
+                    )
+                }
                 {errors.length > 0 && (
                     <div className="alert alert-danger filtered-connection__error">
                         {errors.map((error, index) => (
                             <React.Fragment key={index}>
-                                <ErrorMessage error={error} history={this.props.history} />
+                                <ErrorMessage error={error} />
                             </React.Fragment>
                         ))}
                     </div>
@@ -878,6 +908,7 @@ export class FilteredConnection<N, NP = {}, C extends Connection<N> = Connection
                         listComponent={this.props.listComponent}
                         listClassName={this.props.listClassName}
                         headComponent={this.props.headComponent}
+                        headComponentProps={this.props.headComponentProps}
                         footComponent={this.props.footComponent}
                         showMoreClassName={this.props.showMoreClassName}
                         nodeComponent={this.props.nodeComponent}
@@ -927,7 +958,7 @@ export class FilteredConnection<N, NP = {}, C extends Connection<N> = Connection
         if (this.props.filters === undefined) {
             return
         }
-        const values = this.state.activeValues
+        const values = new Map(this.state.activeValues)
         values.set(filter.id, value)
         this.activeValuesChanges.next(values)
     }

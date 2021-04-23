@@ -1,15 +1,14 @@
 import React, { useState, FunctionComponent, useCallback } from 'react'
-import * as H from 'history'
+
+import { Form } from '@sourcegraph/branded/src/components/Form'
+import { gql, dataOrThrowErrors } from '@sourcegraph/shared/src/graphql/graphql'
+import { asError, ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
 
 import { requestGraphQL } from '../../../backend/graphql'
-import { gql, dataOrThrowErrors } from '../../../../../shared/src/graphql/graphql'
+import { ErrorAlert } from '../../../components/alerts'
+import { LoaderButton } from '../../../components/LoaderButton'
 import { SetUserEmailPrimaryResult, SetUserEmailPrimaryVariables, UserEmailsResult } from '../../../graphql-operations'
 import { eventLogger } from '../../../tracking/eventLogger'
-import { asError, ErrorLike, isErrorLike } from '../../../../../shared/src/util/errors'
-
-import { Form } from '../../../../../branded/src/components/Form'
-import { LoaderButton } from '../../../components/LoaderButton'
-import { ErrorAlert } from '../../../components/alerts'
 
 type UserEmail = NonNullable<UserEmailsResult['node']>['emails'][number]
 
@@ -17,7 +16,6 @@ interface Props {
     user: string
     emails: UserEmail[]
     onDidSet: () => void
-    history: H.History
 
     className?: string
 }
@@ -28,7 +26,7 @@ type Status = undefined | 'loading' | ErrorLike
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 const findPrimaryEmail = (emails: UserEmail[]): string => emails.find(email => email.isPrimary)!.email
 
-export const SetUserPrimaryEmailForm: FunctionComponent<Props> = ({ user, emails, onDidSet, className, history }) => {
+export const SetUserPrimaryEmailForm: FunctionComponent<Props> = ({ user, emails, onDidSet, className }) => {
     const [primaryEmail, setPrimaryEmail] = useState<string>(findPrimaryEmail(emails))
     const [statusOrError, setStatusOrError] = useState<Status>()
 
@@ -99,7 +97,7 @@ export const SetUserPrimaryEmailForm: FunctionComponent<Props> = ({ user, emails
                     className="btn btn-primary"
                 />
             </Form>
-            {isErrorLike(statusOrError) && <ErrorAlert className="mt-2" error={statusOrError} history={history} />}
+            {isErrorLike(statusOrError) && <ErrorAlert className="mt-2" error={statusOrError} />}
         </div>
     )
 }

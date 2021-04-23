@@ -1,6 +1,8 @@
 import React from 'react'
-import * as GQL from '../../../../../shared/src/graphql/schema'
-import { formatUserCount } from '../../productSubscription/helpers'
+
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+
+import { formatUserCount } from '../../../productSubscription/helpers'
 
 /**
  * Displays a text label with the product name (e.g., "Sourcegraph Enterprise") and user count for the

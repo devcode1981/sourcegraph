@@ -1,37 +1,50 @@
-import * as H from 'history'
 import classnames from 'classnames'
-import React, { useCallback, useMemo, useState } from 'react'
-import { BreadcrumbSetters, BreadcrumbsProps } from '../../components/Breadcrumbs'
+import * as H from 'history'
+import PlusIcon from 'mdi-react/PlusIcon'
+import React, { useCallback, useMemo, useState, useEffect } from 'react'
+import { catchError, map, startWith } from 'rxjs/operators'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { Link } from '@sourcegraph/shared/src/components/Link'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { asError, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
+
+import { AuthenticatedUser } from '../../auth'
+import { CodeMonitoringLogo } from '../../code-monitoring/CodeMonitoringLogo'
+import { FilteredConnection } from '../../components/FilteredConnection'
 import { PageHeader } from '../../components/PageHeader'
 import { PageTitle } from '../../components/PageTitle'
-import { AuthenticatedUser } from '../../auth'
-import { FilteredConnection } from '../../components/FilteredConnection'
 import { CodeMonitorFields, ListUserCodeMonitorsResult, ListUserCodeMonitorsVariables } from '../../graphql-operations'
-import { Link } from '../../../../shared/src/components/Link'
-import { CodeMonitoringProps } from '.'
-import PlusIcon from 'mdi-react/PlusIcon'
-import { CodeMonitorNode, CodeMonitorNodeProps } from './CodeMonitoringNode'
-import { catchError, map, startWith } from 'rxjs/operators'
-import { asError, isErrorLike } from '../../../../shared/src/util/errors'
-import { useObservable } from '../../../../shared/src/util/useObservable'
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
-import { SettingsCascadeProps } from '../../../../shared/src/settings/settings'
 import { Settings } from '../../schema/settings.schema'
+import { eventLogger } from '../../tracking/eventLogger'
 
-export interface CodeMonitoringPageProps
-    extends BreadcrumbsProps,
-        BreadcrumbSetters,
-        Pick<CodeMonitoringProps, 'fetchUserCodeMonitors' | 'toggleCodeMonitorEnabled'>,
-        SettingsCascadeProps<Settings> {
+import {
+    fetchUserCodeMonitors as _fetchUserCodeMonitors,
+    toggleCodeMonitorEnabled as _toggleCodeMonitorEnabled,
+} from './backend'
+import { CodeMonitorNode, CodeMonitorNodeProps } from './CodeMonitoringNode'
+
+export interface CodeMonitoringPageProps extends SettingsCascadeProps<Settings> {
     authenticatedUser: AuthenticatedUser
     location: H.Location
     history: H.History
+
+    fetchUserCodeMonitors?: typeof _fetchUserCodeMonitors
+    toggleCodeMonitorEnabled?: typeof _toggleCodeMonitorEnabled
 }
 
 type CodeMonitorFilter = 'all' | 'user'
 
-export const CodeMonitoringPage: React.FunctionComponent<CodeMonitoringPageProps> = props => {
-    const { authenticatedUser, fetchUserCodeMonitors, toggleCodeMonitorEnabled } = props
+export const CodeMonitoringPage: React.FunctionComponent<CodeMonitoringPageProps> = ({
+    history,
+    location,
+    settingsCascade,
+    authenticatedUser,
+    fetchUserCodeMonitors = _fetchUserCodeMonitors,
+    toggleCodeMonitorEnabled = _toggleCodeMonitorEnabled,
+}) => {
+    useEffect(() => eventLogger.logViewEvent('CodeMonitoringPage'), [])
 
     const queryConnection = useCallback(
         (args: Partial<ListUserCodeMonitorsVariables>) =>
@@ -72,28 +85,26 @@ export const CodeMonitoringPage: React.FunctionComponent<CodeMonitoringPageProps
     }, [])
 
     return (
-        <div className="code-monitoring-page container mt-5">
+        <div className="code-monitoring-page">
             <PageTitle title="Code Monitoring" />
             <PageHeader
-                title={
-                    <>
-                        Code monitoring{' '}
-                        <sup>
-                            <span className="badge badge-info text-uppercase">Prototype</span>
-                        </sup>
-                    </>
-                }
-                icon={TowerIcon}
+                path={[
+                    {
+                        icon: CodeMonitoringLogo,
+                        text: 'Code monitoring',
+                    },
+                ]}
                 actions={
                     userHasCodeMonitors &&
                     userHasCodeMonitors !== 'loading' &&
                     !isErrorLike(userHasCodeMonitors) && (
                         <Link to="/code-monitoring/new" className="btn btn-secondary">
                             <PlusIcon className="icon-inline" />
-                            Create new code monitor
+                            Create code monitor
                         </Link>
                     )
                 }
+                className="mb-3"
             />
             {userHasCodeMonitors === 'loading' && <LoadingSpinner />}
             {!userHasCodeMonitors && (
@@ -102,13 +113,9 @@ export const CodeMonitoringPage: React.FunctionComponent<CodeMonitoringPageProps
                         <h2>Get started with code monitoring</h2>
                         <p className="text-muted code-monitoring-page__start-subheading mb-4">
                             Watch your code for changes and trigger actions to get notifications, send webhooks, and
-                            more. <a href="">Learn more.</a>
+                            more. <a href="https://docs.sourcegraph.com/code_monitoring">Learn more.</a>
                         </p>
-                        <Link
-                            to="/code-monitoring/new"
-                            className="code-monitoring-page__start-button btn btn-primary"
-                            type="button"
-                        >
+                        <Link to="/code-monitoring/new" className="code-monitoring-page__start-button btn btn-primary">
                             Create your first code monitor →
                         </Link>
                     </div>
@@ -146,7 +153,9 @@ export const CodeMonitoringPage: React.FunctionComponent<CodeMonitoringPageProps
                                 </div>
                             </div>
                         </div>
-                        <a className="link">Find more starting points in the docs</a>
+                        <a className="link" href="https://docs.sourcegraph.com/code_monitoring/how-tos/starting_points">
+                            Find more starting points in the docs
+                        </a>
                     </div>
                     <div className="code-monitoring-page__learn-more container mt-5">
                         <h3 className="mb-3">Learn more about code monitoring</h3>
@@ -170,7 +179,7 @@ export const CodeMonitoringPage: React.FunctionComponent<CodeMonitoringPageProps
                                     <h4>Starting points and ideas</h4>
                                     <p className="text-muted">
                                         Find specific examples of useful code monitors to keep on top of security and
-                                        consistency concerns.
+                                        consistency concerns.{' '}
                                         <a
                                             href="https://docs.sourcegraph.com/code_monitoring/how-tos/starting_points"
                                             className="link"
@@ -240,18 +249,18 @@ export const CodeMonitoringPage: React.FunctionComponent<CodeMonitoringPageProps
                                     Omit<CodeMonitorNodeProps, 'node'>,
                                     (ListUserCodeMonitorsResult['node'] & { __typename: 'User' })['monitors']
                                 >
-                                    location={props.location}
-                                    history={props.history}
+                                    location={location}
+                                    history={history}
                                     defaultFirst={10}
                                     queryConnection={queryConnection}
                                     hideSearch={true}
                                     nodeComponent={CodeMonitorNode}
                                     nodeComponentProps={{
-                                        authentictedUser: props.authenticatedUser,
-                                        location: props.location,
+                                        authentictedUser: authenticatedUser,
+                                        location,
                                         showCodeMonitoringTestEmailButton:
-                                            (!isErrorLike(props.settingsCascade.final) &&
-                                                props.settingsCascade.final?.experimentalFeatures
+                                            (!isErrorLike(settingsCascade.final) &&
+                                                settingsCascade.final?.experimentalFeatures
                                                     ?.showCodeMonitoringTestEmailButton) ||
                                             false,
                                         toggleCodeMonitorEnabled,
@@ -273,5 +282,3 @@ export const CodeMonitoringPage: React.FunctionComponent<CodeMonitoringPageProps
         </div>
     )
 }
-
-const TowerIcon: React.FunctionComponent = () => <span>🗼</span>

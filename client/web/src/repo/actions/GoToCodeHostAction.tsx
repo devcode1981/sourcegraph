@@ -1,21 +1,25 @@
-import { Position, Range } from '@sourcegraph/extension-api-types'
-import { upperFirst } from 'lodash'
+import { upperFirst, toLower } from 'lodash'
 import BitbucketIcon from 'mdi-react/BitbucketIcon'
 import ExportIcon from 'mdi-react/ExportIcon'
 import GithubIcon from 'mdi-react/GithubIcon'
+import GitlabIcon from 'mdi-react/GitlabIcon'
 import React, { useCallback, useMemo, useState } from 'react'
 import { merge, of } from 'rxjs'
 import { catchError } from 'rxjs/operators'
-import { PhabricatorIcon } from '../../../../shared/src/components/icons' // TODO: Switch mdi icon
-import { asError, ErrorLike, isErrorLike } from '../../../../shared/src/util/errors'
-import { fetchFileExternalLinks } from '../backend'
-import { RevisionSpec, FileSpec } from '../../../../shared/src/util/url'
-import { ExternalLinkFields, RepositoryFields } from '../../graphql-operations'
-import { useObservable } from '../../../../shared/src/util/useObservable'
-import GitlabIcon from 'mdi-react/GitlabIcon'
+
+import { Position, Range } from '@sourcegraph/extension-api-types'
+import { PhabricatorIcon } from '@sourcegraph/shared/src/components/icons' // TODO: Switch mdi icon
+import { asError, ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { RevisionSpec, FileSpec } from '@sourcegraph/shared/src/util/url'
+import { useLocalStorage } from '@sourcegraph/shared/src/util/useLocalStorage'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
+
+import { ExternalLinkFields, RepositoryFields, ExternalServiceKind } from '../../graphql-operations'
 import { eventLogger } from '../../tracking/eventLogger'
+import { fetchFileExternalLinks } from '../backend'
+import { RepoHeaderContext } from '../RepoHeader'
+
 import { InstallBrowserExtensionPopover } from './InstallBrowserExtensionPopover'
-import { useLocalStorage } from '../../util/useLocalStorage'
 
 interface GoToCodeHostPopoverProps {
     /**
@@ -40,6 +44,8 @@ interface Props extends RevisionSpec, Partial<FileSpec>, GoToCodeHostPopoverProp
     externalLinks?: ExternalLinkFields[]
 
     fetchFileExternalLinks: typeof fetchFileExternalLinks
+
+    actionType?: 'nav' | 'dropdown'
 }
 
 const HAS_PERMANENTLY_DISMISSED_POPUP_KEY = 'has-dismissed-browser-ext-popup'
@@ -47,7 +53,7 @@ const HAS_PERMANENTLY_DISMISSED_POPUP_KEY = 'has-dismissed-browser-ext-popup'
 /**
  * A repository header action that goes to the corresponding URL on an external code host.
  */
-export const GoToCodeHostAction: React.FunctionComponent<Props> = props => {
+export const GoToCodeHostAction: React.FunctionComponent<Props & RepoHeaderContext> = props => {
     const [showPopover, setShowPopover] = useState(false)
 
     const { onPopoverDismissed, repo, revision, filePath } = props
@@ -57,7 +63,8 @@ export const GoToCodeHostAction: React.FunctionComponent<Props> = props => {
         false
     )
 
-    const hijackLink = !hasPermanentlyDismissedPopup && props.canShowPopover
+    // Popover won't work with dropdown
+    const hijackLink = !hasPermanentlyDismissedPopup && props.canShowPopover && !(props.actionType === 'dropdown')
 
     /**
      * The external links for the current file/dir, or undefined while loading, null while not
@@ -116,6 +123,8 @@ export const GoToCodeHostAction: React.FunctionComponent<Props> = props => {
 
     const onClick = useCallback(
         (event: React.MouseEvent<HTMLAnchorElement, MouseEvent>) => {
+            eventLogger.log('GoToCodeHostClicked')
+
             if (showPopover) {
                 event.preventDefault()
                 setShowPopover(false)
@@ -162,12 +171,15 @@ export const GoToCodeHostAction: React.FunctionComponent<Props> = props => {
     // Only show the first external link for now.
     const externalURL = externalURLs[0]
 
-    const { displayName, icon } = serviceTypeDisplayNameAndIcon(externalURL.serviceType)
+    const { displayName, icon } = serviceKindDisplayNameAndIcon(externalURL.serviceKind)
     const Icon = icon || ExportIcon
 
     // Extract url to add branch, line numbers or commit range.
     let url = externalURL.url
-    if (externalURL.serviceType === 'github' || externalURL.serviceType === 'gitlab') {
+    if (
+        externalURL.serviceKind === ExternalServiceKind.GITHUB ||
+        externalURL.serviceKind === ExternalServiceKind.GITLAB
+    ) {
         // If in a branch, add branch path to the code host URL.
         if (props.revision && props.revision !== defaultBranch && !fileExternalLinksOrError) {
             url += `/tree/${props.revision}`
@@ -178,7 +190,7 @@ export const GoToCodeHostAction: React.FunctionComponent<Props> = props => {
         }
         // Add range or position path to the code host URL.
         if (props.range) {
-            const rangeEndPrefix = externalURL.serviceType === 'gitlab' ? '' : 'L'
+            const rangeEndPrefix = externalURL.serviceKind === ExternalServiceKind.GITLAB ? '' : 'L'
             url += `#L${props.range.start.line}-${rangeEndPrefix}${props.range.end.line}`
         } else if (props.position) {
             url += `#L${props.position.line}`
@@ -187,8 +199,29 @@ export const GoToCodeHostAction: React.FunctionComponent<Props> = props => {
 
     const TARGET_ID = 'go-to-code-host'
 
+    // Don't show browser extension popover on small screens
+    if (props.actionType === 'dropdown') {
+        return (
+            // eslint-disable-next-line jsx-a11y/anchor-is-valid
+            <a
+                className="nav-link repo-header__file-action test-go-to-code-host"
+                // empty href is OK because we always set tabindex=0
+                href={hijackLink ? '' : url}
+                target="_blank"
+                rel="noopener noreferrer"
+                id={TARGET_ID}
+                onClick={onClick}
+                onAuxClick={onClick}
+            >
+                <Icon className="icon-inline" />
+                <span>View on {displayName}</span>
+            </a>
+        )
+    }
+
     return (
         <>
+            {/* eslint-disable-next-line jsx-a11y/anchor-is-valid */}
             <a
                 className="nav-link test-go-to-code-host"
                 // empty href is OK because we always set tabindex=0
@@ -207,7 +240,7 @@ export const GoToCodeHostAction: React.FunctionComponent<Props> = props => {
                 url={url}
                 toggle={toggle}
                 isOpen={showPopover}
-                serviceType={externalURL.serviceType}
+                serviceKind={externalURL.serviceKind}
                 onClose={onClose}
                 onRejection={onRejection}
                 onClickInstall={onClickInstall}
@@ -217,23 +250,25 @@ export const GoToCodeHostAction: React.FunctionComponent<Props> = props => {
     )
 }
 
-export function serviceTypeDisplayNameAndIcon(
-    serviceType: string | null
+export function serviceKindDisplayNameAndIcon(
+    serviceKind: ExternalServiceKind | null
 ): { displayName: string; icon?: React.ComponentType<{ className?: string }> } {
-    switch (serviceType) {
-        case 'github':
-            return { displayName: 'GitHub', icon: GithubIcon }
-        case 'gitlab':
-            return { displayName: 'GitLab', icon: GitlabIcon }
-        case 'bitbucketServer':
-            // TODO: Why is bitbucketServer (correctly) camelCase but
-            // awscodecommit is (correctly) lowercase? Why is serviceType
-            // not type-checked for validity?
-            return { displayName: 'Bitbucket Server', icon: BitbucketIcon }
-        case 'phabricator':
-            return { displayName: 'Phabricator', icon: PhabricatorIcon }
-        case 'awscodecommit':
-            return { displayName: 'AWS CodeCommit' }
+    if (!serviceKind) {
+        return { displayName: 'code host' }
     }
-    return { displayName: serviceType ? upperFirst(serviceType) : 'code host' }
+
+    switch (serviceKind) {
+        case ExternalServiceKind.GITHUB:
+            return { displayName: 'GitHub', icon: GithubIcon }
+        case ExternalServiceKind.GITLAB:
+            return { displayName: 'GitLab', icon: GitlabIcon }
+        case ExternalServiceKind.BITBUCKETSERVER:
+            return { displayName: 'Bitbucket Server', icon: BitbucketIcon }
+        case ExternalServiceKind.PHABRICATOR:
+            return { displayName: 'Phabricator', icon: PhabricatorIcon }
+        case ExternalServiceKind.AWSCODECOMMIT:
+            return { displayName: 'AWS CodeCommit' }
+        default:
+            return { displayName: upperFirst(toLower(serviceKind)) }
+    }
 }

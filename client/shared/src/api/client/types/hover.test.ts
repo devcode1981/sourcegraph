@@ -1,5 +1,6 @@
 import { MarkupKind } from '@sourcegraph/extension-api-classes'
 import { Range } from '@sourcegraph/extension-api-types'
+
 import { fromHoverMerged } from './hover'
 
 const FIXTURE_RANGE: Range = { start: { line: 1, character: 2 }, end: { line: 3, character: 4 } }
@@ -13,6 +14,7 @@ describe('HoverMerged', () => {
             expect(fromHoverMerged([{ contents: { kind: MarkupKind.Markdown, value: 'x' } }])).toEqual({
                 contents: [{ kind: MarkupKind.Markdown, value: 'x' }],
                 alerts: [],
+                aggregatedBadges: [],
             }))
         test('2 MarkupContents', () =>
             expect(
@@ -27,6 +29,7 @@ describe('HoverMerged', () => {
                 ],
                 range: FIXTURE_RANGE,
                 alerts: [],
+                aggregatedBadges: [],
             }))
         test('1 Alert', () =>
             expect(
@@ -39,6 +42,7 @@ describe('HoverMerged', () => {
             ).toEqual({
                 contents: [{ kind: MarkupKind.Markdown, value: 'x' }],
                 alerts: [{ summary: { kind: MarkupKind.PlainText, value: 'x' } }],
+                aggregatedBadges: [],
             }))
         test('2 Alerts', () =>
             expect(
@@ -57,6 +61,30 @@ describe('HoverMerged', () => {
                     { summary: { kind: MarkupKind.PlainText, value: 'x' } },
                     { summary: { kind: MarkupKind.PlainText, value: 'y' } },
                 ],
+                aggregatedBadges: [],
+            }))
+
+        test('Aggregated Badges', () =>
+            expect(
+                fromHoverMerged([
+                    {
+                        contents: { kind: MarkupKind.Markdown, value: 'x' },
+                        alerts: [],
+                        aggregableBadges: [{ text: 't01' }, { text: 't03' }],
+                    },
+                    {
+                        contents: { kind: MarkupKind.Markdown, value: 'y' },
+                        alerts: [],
+                        aggregableBadges: [{ text: 't02' }],
+                    },
+                ])
+            ).toEqual({
+                contents: [
+                    { kind: MarkupKind.Markdown, value: 'x' },
+                    { kind: MarkupKind.Markdown, value: 'y' },
+                ],
+                alerts: [],
+                aggregatedBadges: [{ text: 't01' }, { text: 't02' }, { text: 't03' }],
             }))
     })
 })

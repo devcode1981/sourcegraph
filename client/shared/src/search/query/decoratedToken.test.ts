@@ -1,7 +1,8 @@
-import { Token } from './token'
+import { SearchPatternType } from '../../graphql-operations'
+
 import { getMonacoTokens } from './decoratedToken'
 import { scanSearchQuery, ScanSuccess, ScanResult } from './scanner'
-import { SearchPatternType } from '../../graphql-operations'
+import { Token } from './token'
 
 expect.addSnapshotSerializer({
     serialize: value => JSON.stringify(value, null, 2),
@@ -1043,6 +1044,34 @@ describe('getMonacoTokens()', () => {
         `)
     })
 
+    test('do not decorate regex syntax when filter value is quoted', () => {
+        expect(getMonacoTokens(toSuccess(scanSearchQuery('repo:"^do-not-attempt$" file:\'.*\'')), true))
+            .toMatchInlineSnapshot(`
+            [
+              {
+                "startIndex": 0,
+                "scopes": "field"
+              },
+              {
+                "startIndex": 5,
+                "scopes": "identifier"
+              },
+              {
+                "startIndex": 23,
+                "scopes": "whitespace"
+              },
+              {
+                "startIndex": 24,
+                "scopes": "field"
+              },
+              {
+                "startIndex": 29,
+                "scopes": "identifier"
+              }
+            ]
+        `)
+    })
+
     test('decorate repo revision syntax, path with wildcard and negation', () => {
         expect(getMonacoTokens(toSuccess(scanSearchQuery('repo:foo@*refs/heads/*:*!refs/heads/release*')), true))
             .toMatchInlineSnapshot(`
@@ -1102,6 +1131,240 @@ describe('getMonacoTokens()', () => {
               {
                 "startIndex": 44,
                 "scopes": "metaRevisionLabel"
+              }
+            ]
+        `)
+    })
+
+    test('decorate search context value', () => {
+        expect(getMonacoTokens(toSuccess(scanSearchQuery('context:@user')), true)).toMatchInlineSnapshot(`
+            [
+              {
+                "startIndex": 0,
+                "scopes": "field"
+              },
+              {
+                "startIndex": 8,
+                "scopes": "metaContextPrefix"
+              },
+              {
+                "startIndex": 9,
+                "scopes": "identifier"
+              }
+            ]
+        `)
+    })
+
+    test('returns path separator tokens for regexp values', () => {
+        expect(getMonacoTokens(toSuccess(scanSearchQuery('r:^github.com/sourcegraph@HEAD f:a/b/')), true))
+            .toMatchInlineSnapshot(`
+            [
+              {
+                "startIndex": 0,
+                "scopes": "field"
+              },
+              {
+                "startIndex": 2,
+                "scopes": "metaRegexpAssertion"
+              },
+              {
+                "startIndex": 3,
+                "scopes": "identifier"
+              },
+              {
+                "startIndex": 9,
+                "scopes": "metaRegexpCharacterSet"
+              },
+              {
+                "startIndex": 10,
+                "scopes": "identifier"
+              },
+              {
+                "startIndex": 13,
+                "scopes": "metaPathSeparator"
+              },
+              {
+                "startIndex": 14,
+                "scopes": "identifier"
+              },
+              {
+                "startIndex": 25,
+                "scopes": "metaRepoRevisionSeparator"
+              },
+              {
+                "startIndex": 26,
+                "scopes": "metaRevisionLabel"
+              },
+              {
+                "startIndex": 30,
+                "scopes": "whitespace"
+              },
+              {
+                "startIndex": 31,
+                "scopes": "field"
+              },
+              {
+                "startIndex": 33,
+                "scopes": "identifier"
+              },
+              {
+                "startIndex": 34,
+                "scopes": "metaPathSeparator"
+              },
+              {
+                "startIndex": 35,
+                "scopes": "identifier"
+              },
+              {
+                "startIndex": 36,
+                "scopes": "metaPathSeparator"
+              }
+            ]
+        `)
+    })
+
+    test('returns regexp highlighting if path separators cannot be parsed', () => {
+        expect(getMonacoTokens(toSuccess(scanSearchQuery('r:^github.com(/)sourcegraph')), true)).toMatchInlineSnapshot(`
+            [
+              {
+                "startIndex": 0,
+                "scopes": "field"
+              },
+              {
+                "startIndex": 2,
+                "scopes": "metaRegexpAssertion"
+              },
+              {
+                "startIndex": 3,
+                "scopes": "identifier"
+              },
+              {
+                "startIndex": 9,
+                "scopes": "metaRegexpCharacterSet"
+              },
+              {
+                "startIndex": 10,
+                "scopes": "identifier"
+              },
+              {
+                "startIndex": 13,
+                "scopes": "metaRegexpDelimited"
+              },
+              {
+                "startIndex": 14,
+                "scopes": "identifier"
+              },
+              {
+                "startIndex": 15,
+                "scopes": "metaRegexpDelimited"
+              },
+              {
+                "startIndex": 16,
+                "scopes": "identifier"
+              }
+            ]
+        `)
+    })
+
+    test('highlight recognized predicate with body as regexp', () => {
+        expect(getMonacoTokens(toSuccess(scanSearchQuery('repo:contains.file(README.md)')), true))
+            .toMatchInlineSnapshot(`
+            [
+              {
+                "startIndex": 0,
+                "scopes": "field"
+              },
+              {
+                "startIndex": 5,
+                "scopes": "metaPredicateNameAccess"
+              },
+              {
+                "startIndex": 13,
+                "scopes": "metaPredicateDot"
+              },
+              {
+                "startIndex": 14,
+                "scopes": "metaPredicateNameAccess"
+              },
+              {
+                "startIndex": 18,
+                "scopes": "metaPredicateParenthesis"
+              },
+              {
+                "startIndex": 19,
+                "scopes": "identifier"
+              },
+              {
+                "startIndex": 25,
+                "scopes": "metaRegexpCharacterSet"
+              },
+              {
+                "startIndex": 26,
+                "scopes": "identifier"
+              },
+              {
+                "startIndex": 28,
+                "scopes": "metaPredicateParenthesis"
+              }
+            ]
+        `)
+    })
+
+    test('highlight recognized predicate with multiple fields', () => {
+        expect(getMonacoTokens(toSuccess(scanSearchQuery('repo:contains(file:README.md content:^fix$)')), true))
+            .toMatchInlineSnapshot(`
+            [
+              {
+                "startIndex": 0,
+                "scopes": "field"
+              },
+              {
+                "startIndex": 5,
+                "scopes": "metaPredicateNameAccess"
+              },
+              {
+                "startIndex": 13,
+                "scopes": "metaPredicateParenthesis"
+              },
+              {
+                "startIndex": 14,
+                "scopes": "field"
+              },
+              {
+                "startIndex": 19,
+                "scopes": "identifier"
+              },
+              {
+                "startIndex": 25,
+                "scopes": "metaRegexpCharacterSet"
+              },
+              {
+                "startIndex": 26,
+                "scopes": "identifier"
+              },
+              {
+                "startIndex": 28,
+                "scopes": "whitespace"
+              },
+              {
+                "startIndex": 29,
+                "scopes": "field"
+              },
+              {
+                "startIndex": 37,
+                "scopes": "metaRegexpAssertion"
+              },
+              {
+                "startIndex": 38,
+                "scopes": "identifier"
+              },
+              {
+                "startIndex": 41,
+                "scopes": "metaRegexpAssertion"
+              },
+              {
+                "startIndex": 42,
+                "scopes": "metaPredicateParenthesis"
               }
             ]
         `)

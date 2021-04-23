@@ -11,7 +11,8 @@ import (
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend/graphqlutil"
 	"github.com/sourcegraph/sourcegraph/internal/api"
-	"github.com/sourcegraph/sourcegraph/internal/db"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 )
 
@@ -19,6 +20,7 @@ var _ graphqlbackend.RepositoryConnectionResolver = &repositoryConnectionResolve
 
 // repositoryConnectionResolver resolves a list of repositories from the roaring bitmap with pagination.
 type repositoryConnectionResolver struct {
+	db  dbutil.DB
 	ids *roaring.Bitmap
 
 	first int32
@@ -57,7 +59,7 @@ func (r *repositoryConnectionResolver) compute(ctx context.Context) ([]*types.Re
 
 		// TODO(asdine): GetByIDs now returns the complete repo information rather that only a subset.
 		// Ensure this doesn't have an impact on performance and switch to using ListRepoNames if needed.
-		r.repos, r.err = db.Repos.GetByIDs(ctx, repoIDs...)
+		r.repos, r.err = database.GlobalRepos.GetByIDs(ctx, repoIDs...)
 		if r.err != nil {
 			return
 		}
@@ -84,7 +86,7 @@ func (r *repositoryConnectionResolver) Nodes(ctx context.Context) ([]*graphqlbac
 	}
 	resolvers := make([]*graphqlbackend.RepositoryResolver, len(repos))
 	for i := range repos {
-		resolvers[i] = graphqlbackend.NewRepositoryResolver(repos[i])
+		resolvers[i] = graphqlbackend.NewRepositoryResolver(r.db, repos[i])
 	}
 	return resolvers, nil
 }

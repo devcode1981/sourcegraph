@@ -1,5 +1,7 @@
 import { Observable, of } from 'rxjs'
-import { ISavedSearch, Namespace, IOrg, IUser } from '../../../../shared/src/graphql/schema'
+
+import { ISavedSearch, Namespace, IOrg, IUser } from '@sourcegraph/shared/src/graphql/schema'
+
 import { AuthenticatedUser } from '../../auth'
 import { EventLogResult } from '../backend'
 
@@ -57,6 +59,12 @@ export const org: IOrg = {
     namespaceName: 'test-org',
     campaigns: {
         __typename: 'CampaignConnection',
+        nodes: [],
+        totalCount: 0,
+        pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },
+    },
+    batchChanges: {
+        __typename: 'BatchChangeConnection',
         nodes: [],
         totalCount: 0,
         pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },

@@ -10,7 +10,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/sourcegraph/sourcegraph/internal/api"
-	"github.com/sourcegraph/sourcegraph/internal/db"
+	"github.com/sourcegraph/sourcegraph/internal/database"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc/phabricator"
 	"github.com/sourcegraph/sourcegraph/internal/httpcli"
@@ -113,10 +113,6 @@ func (s *PhabricatorSource) makeRepo(repo *phabricator.Repo) (*types.Repo, error
 	} {
 		if u, ok := builtin[alt.protocol+"+"+alt.identifier]; ok {
 			cloneURL = u.Effective
-			// TODO(tsenart): Authenticate the cloneURL with the user's
-			// VCS password once we have that setting in the config. The
-			// Conduit token can't be used for cloning.
-			// cloneURL = setUserinfoBestEffort(cloneURL, conn.VCSPassword, "")
 
 			if name == "" {
 				name = u.Normalized
@@ -187,7 +183,7 @@ func RunPhabricatorRepositorySyncWorker(ctx context.Context, s *Store) {
 	cf := httpcli.NewExternalHTTPClientFactory()
 
 	for {
-		phabs, err := s.ExternalServiceStore.List(ctx, db.ExternalServicesListOptions{
+		phabs, err := s.ExternalServiceStore.List(ctx, database.ExternalServicesListOptions{
 			Kinds: []string{extsvc.KindPhabricator},
 		})
 		if err != nil {
@@ -234,7 +230,7 @@ func updatePhabRepos(ctx context.Context, repos []*types.Repo) error {
 		repo := r.Metadata.(*phabricator.Repo)
 		err := api.InternalClient.PhabricatorRepoCreate(
 			ctx,
-			api.RepoName(r.Name),
+			r.Name,
 			repo.Callsign,
 			r.ExternalRepo.ServiceID,
 		)

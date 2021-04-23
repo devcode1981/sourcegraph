@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/hexops/autogold"
 )
 
 func toJSON(node Node) interface{} {
@@ -74,14 +75,6 @@ func nodesToJSON(nodes []Node) string {
 	return string(json)
 }
 
-func prettyPrint(nodes []Node) string {
-	var resultStr []string
-	for _, node := range nodes {
-		resultStr = append(resultStr, node.String())
-	}
-	return strings.Join(resultStr, " ")
-}
-
 func TestSubstituteAliases(t *testing.T) {
 	cases := []struct {
 		input      string
@@ -107,8 +100,8 @@ func TestSubstituteAliases(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run("substitute alises", func(t *testing.T) {
-			query, _ := ProcessAndOr(c.input, ParserOptions{SearchType: c.searchType})
-			if diff := cmp.Diff(nodesToJSON(query.(*AndOrQuery).Query), c.want); diff != "" {
+			query, _ := ParseSearchType(c.input, c.searchType)
+			if diff := cmp.Diff(nodesToJSON(query), c.want); diff != "" {
 				t.Fatal(diff)
 			}
 		})
@@ -118,8 +111,8 @@ func TestSubstituteAliases(t *testing.T) {
 func TestLowercaseFieldNames(t *testing.T) {
 	input := "rEpO:foo PATTERN"
 	want := `(and "repo:foo" "PATTERN")`
-	query, _ := ParseAndOr(input, SearchTypeRegex)
-	got := prettyPrint(LowercaseFieldNames(query))
+	query, _ := Parse(input, SearchTypeRegex)
+	got := toString(LowercaseFieldNames(query))
 	if diff := cmp.Diff(got, want); diff != "" {
 		t.Fatal(diff)
 	}
@@ -209,66 +202,9 @@ func TestHoist(t *testing.T) {
 				}
 				return
 			}
-			got := prettyPrint(hoistedQuery)
+			got := toString(hoistedQuery)
 			if diff := cmp.Diff(c.want, got); diff != "" {
 				t.Error(diff)
-			}
-		})
-	}
-}
-
-func TestSearchUppercase(t *testing.T) {
-	cases := []struct {
-		input string
-		want  string
-	}{
-		{
-			input: `TeSt`,
-			want:  `(and "TeSt" "case:yes")`,
-		},
-		{
-			input: `test`,
-			want:  `"test"`,
-		},
-		{
-			input: `content:TeSt`,
-			want:  `(and "TeSt" "case:yes")`,
-		},
-		{
-			input: `content:test`,
-			want:  `"test"`,
-		},
-		{
-			input: `repo:foo TeSt`,
-			want:  `(and "repo:foo" "TeSt" "case:yes")`,
-		},
-		{
-			input: `repo:foo test`,
-			want:  `(and "repo:foo" "test")`,
-		},
-		{
-			input: `repo:foo content:TeSt`,
-			want:  `(and "repo:foo" "TeSt" "case:yes")`,
-		},
-		{
-			input: `repo:foo content:test`,
-			want:  `(and "repo:foo" "test")`,
-		},
-		{
-			input: `TeSt1 TesT2`,
-			want:  `(and (concat "TeSt1" "TesT2") "case:yes")`,
-		},
-		{
-			input: `TeSt1 test2`,
-			want:  `(and (concat "TeSt1" "test2") "case:yes")`,
-		},
-	}
-	for _, c := range cases {
-		t.Run("searchUppercase", func(t *testing.T) {
-			query, _ := ParseAndOr(c.input, SearchTypeRegex)
-			got := prettyPrint(SearchUppercase(SubstituteAliases(SearchTypeRegex)(query)))
-			if diff := cmp.Diff(c.want, got); diff != "" {
-				t.Fatal(diff)
 			}
 		})
 	}
@@ -310,8 +246,8 @@ func TestSubstituteOrForRegexp(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run("Map query", func(t *testing.T) {
-			query, _ := ParseAndOr(c.input, SearchTypeRegex)
-			got := prettyPrint(substituteOrForRegexp(query))
+			query, _ := Parse(c.input, SearchTypeRegex)
+			got := toString(substituteOrForRegexp(query))
 			if diff := cmp.Diff(c.want, got); diff != "" {
 				t.Fatal(diff)
 			}
@@ -368,8 +304,8 @@ func TestSubstituteConcat(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run("Map query", func(t *testing.T) {
-			query, _ := ParseAndOr(c.input, SearchTypeRegex)
-			got := prettyPrint(Map(query, substituteConcat(c.concat)))
+			query, _ := Parse(c.input, SearchTypeRegex)
+			got := toString(Map(query, substituteConcat(c.concat)))
 			if diff := cmp.Diff(c.want, got); diff != "" {
 				t.Fatal(diff)
 			}
@@ -381,8 +317,8 @@ func TestEllipsesForHoles(t *testing.T) {
 	input := "if ... { ... }"
 	want := `"if :[_] { :[_] }"`
 	t.Run("Ellipses for holes", func(t *testing.T) {
-		query, _ := ProcessAndOr(input, ParserOptions{SearchType: SearchTypeStructural})
-		got := prettyPrint(query.(*AndOrQuery).Query)
+		query, _ := Run(InitStructural(input))
+		got := toString(query)
 		if diff := cmp.Diff(want, got); diff != "" {
 			t.Fatal(diff)
 		}
@@ -443,9 +379,9 @@ func TestConvertEmptyGroupsToLiteral(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run("Map query", func(t *testing.T) {
-			query, _ := ParseAndOr(c.input, SearchTypeRegex)
+			query, _ := Parse(c.input, SearchTypeRegex)
 			got := escapeParensHeuristic(query)[0].(Pattern)
-			if diff := cmp.Diff(c.want, prettyPrint([]Node{got})); diff != "" {
+			if diff := cmp.Diff(c.want, toString([]Node{got})); diff != "" {
 				t.Error(diff)
 			}
 			if diff := cmp.Diff(c.wantLabels, got.Annotation.Labels); diff != "" {
@@ -495,11 +431,11 @@ func TestExpandOr(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run("Map query", func(t *testing.T) {
-			query, _ := ParseAndOr(c.input, SearchTypeRegex)
+			query, _ := Parse(c.input, SearchTypeRegex)
 			queries := Dnf(query)
 			var queriesStr []string
 			for _, q := range queries {
-				queriesStr = append(queriesStr, prettyPrint(q))
+				queriesStr = append(queriesStr, toString(q))
 			}
 			got := "(" + strings.Join(queriesStr, ") OR (") + ")"
 			if diff := cmp.Diff(c.want, got); diff != "" {
@@ -528,8 +464,8 @@ func TestMap(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run("Map query", func(t *testing.T) {
-			query, _ := ParseAndOr(c.input, SearchTypeRegex)
-			got := prettyPrint(Map(query, c.fns...))
+			query, _ := Parse(c.input, SearchTypeRegex)
+			got := toString(Map(query, c.fns...))
 			if diff := cmp.Diff(c.want, got); diff != "" {
 				t.Fatal(diff)
 			}
@@ -784,8 +720,8 @@ func TestFuzzifyRegexPatterns(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
-			query, _ := ParseAndOr(tt.in, SearchTypeRegex)
-			got := prettyPrint(FuzzifyRegexPatterns(query))
+			query, _ := Parse(tt.in, SearchTypeRegex)
+			got := toString(FuzzifyRegexPatterns(query))
 			if got != tt.want {
 				t.Fatalf("got = %v, want %v", got, tt.want)
 			}
@@ -927,9 +863,9 @@ func TestMapGlobToRegex(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.input, func(t *testing.T) {
-			query, _ := ParseAndOr(c.input, SearchTypeRegex)
-			regexQuery, _ := mapGlobToRegex(query)
-			got := prettyPrint(regexQuery)
+			query, _ := Parse(c.input, SearchTypeRegex)
+			regexQuery, _ := Globbing(query)
+			got := toString(regexQuery)
 			if diff := cmp.Diff(c.want, got); diff != "" {
 				t.Fatal(diff)
 			}
@@ -956,7 +892,7 @@ func TestConcatRevFilters(t *testing.T) {
 		},
 		{
 			input: "repo:foo bar and bas rev:a",
-			want:  `("repo:foo@a" "bar" "bas")`,
+			want:  `("repo:foo@a" (and "bar" "bas"))`,
 		},
 		{
 			input: "(repo:foo rev:a) or (repo:foo rev:b)",
@@ -969,13 +905,13 @@ func TestConcatRevFilters(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.input, func(t *testing.T) {
-			query, _ := ParseAndOr(c.input, SearchTypeRegex)
-			queries := Dnf(query)
+			query, _ := Parse(c.input, SearchTypeRegex)
+			plan, _ := ToPlan(Dnf(query))
 
 			var queriesStr []string
-			for _, q := range queries {
-				qConcat := ConcatRevFilters(q)
-				queriesStr = append(queriesStr, prettyPrint(qConcat))
+			for _, basic := range plan {
+				p := ConcatRevFilters(basic)
+				queriesStr = append(queriesStr, toString(p.ToParseTree()))
 			}
 			got := "(" + strings.Join(queriesStr, ") OR (") + ")"
 			if diff := cmp.Diff(c.want, got); diff != "" {
@@ -1005,11 +941,35 @@ func TestConcatRevFiltersTopLevelAnd(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.input, func(t *testing.T) {
-			query, _ := ParseAndOr(c.input, SearchTypeRegex)
-			qConcat := ConcatRevFilters(query)
-			if diff := cmp.Diff(c.want, prettyPrint(qConcat)); diff != "" {
+			query, _ := Parse(c.input, SearchTypeRegex)
+			plan, _ := ToPlan(Dnf(query))
+			p := MapPlan(plan, ConcatRevFilters)
+			if diff := cmp.Diff(c.want, toString(p.ToParseTree())); diff != "" {
 				t.Error(diff)
 			}
 		})
 	}
+}
+
+func TestQueryField(t *testing.T) {
+	test := func(input, field string) string {
+		q, _ := ParseLiteral(input)
+		return OmitField(q, field)
+	}
+
+	autogold.Want("omit repo", "pattern").Equal(t, test("repo:stuff pattern", "repo"))
+	autogold.Want("omit repo alias", "alias-pattern").Equal(t, test("r:stuff alias-pattern", "repo"))
+}
+
+func TestSubstituteCountAll(t *testing.T) {
+	test := func(input string) string {
+		query, _ := Parse(input, SearchTypeLiteral)
+		q := SubstituteCountAll(query)
+		return toString(q)
+	}
+
+	autogold.Want("all", `(and "count:99999999" "foo")`).Equal(t, test("foo count:all"))
+	autogold.Want("ALL", `(and "count:99999999" "foo")`).Equal(t, test("foo count:ALL"))
+	autogold.Want("with integer count", `(and "count:3" "foo")`).Equal(t, test("foo count:3"))
+	autogold.Want("subexpressions", `(or (and "count:3" "foo") (and "count:99999999" "bar"))`).Equal(t, test("(foo count:3) or (bar count:all)"))
 }

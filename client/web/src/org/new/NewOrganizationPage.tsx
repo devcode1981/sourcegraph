@@ -1,14 +1,16 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import * as H from 'history'
 import React, { useCallback, useEffect, useState } from 'react'
+
+import { Form } from '@sourcegraph/branded/src/components/Form'
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { Link } from '@sourcegraph/shared/src/components/Link'
+import { asError, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+
 import { ORG_NAME_MAX_LENGTH, VALID_ORG_NAME_REGEXP } from '..'
-import { Form } from '../../../../branded/src/components/Form'
+import { ErrorAlert } from '../../components/alerts'
 import { PageTitle } from '../../components/PageTitle'
 import { eventLogger } from '../../tracking/eventLogger'
 import { createOrganization } from '../backend'
-import { ErrorAlert } from '../../components/alerts'
-import { Link } from '../../../../shared/src/components/Link'
-import { asError, isErrorLike } from '../../../../shared/src/util/errors'
 
 interface Props {
     history: H.History
@@ -57,10 +59,10 @@ export const NewOrganizationPage: React.FunctionComponent<Props> = ({ history })
                 <h1>Create a new organization</h1>
                 <p>
                     An organization is a set of users with associated configuration. See{' '}
-                    <Link to="/help/user/organizations">Sourcegraph documentation</Link> for information about
+                    <Link to="/help/admin/organizations">Sourcegraph documentation</Link> for information about
                     configuring organizations.
                 </p>
-                {isErrorLike(loading) && <ErrorAlert className="mb-3" error={loading} history={history} />}
+                {isErrorLike(loading) && <ErrorAlert className="mb-3" error={loading} />}
                 <div className="form-group">
                     <label htmlFor="new-org-page__form-name">Organization name</label>
                     <input

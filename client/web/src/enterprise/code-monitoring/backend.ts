@@ -1,10 +1,12 @@
 import { Observable } from 'rxjs'
 import { map } from 'rxjs/operators'
+
 import {
     createInvalidGraphQLMutationResponseError,
     dataOrThrowErrors,
     gql,
-} from '../../../../shared/src/graphql/graphql'
+} from '@sourcegraph/shared/src/graphql/graphql'
+
 import { requestGraphQL } from '../../backend/graphql'
 import {
     CreateCodeMonitorResult,
@@ -26,6 +28,8 @@ import {
     ToggleCodeMonitorEnabledVariables,
     UpdateCodeMonitorResult,
     UpdateCodeMonitorVariables,
+    TriggerTestEmailActionResult,
+    TriggerTestEmailActionVariables,
 } from '../../graphql-operations'
 
 const CodeMonitorFragment = gql`
@@ -264,6 +268,33 @@ export const sendTestEmail = (id: Scalars['ID']): Observable<void> => {
             if (!data.resetTriggerQueryTimestamps) {
                 console.log('DATA', data)
                 throw createInvalidGraphQLMutationResponseError('ResetTriggerQueryTimestamps')
+            }
+        })
+    )
+}
+
+export const triggerTestEmailAction = ({
+    namespace,
+    description,
+    email,
+}: TriggerTestEmailActionVariables): Observable<void> => {
+    const query = gql`
+        mutation TriggerTestEmailAction($namespace: ID!, $description: String!, $email: MonitorEmailInput!) {
+            triggerTestEmailAction(namespace: $namespace, description: $description, email: $email) {
+                alwaysNil
+            }
+        }
+    `
+
+    return requestGraphQL<TriggerTestEmailActionResult, TriggerTestEmailActionVariables>(query, {
+        namespace,
+        description,
+        email,
+    }).pipe(
+        map(dataOrThrowErrors),
+        map(data => {
+            if (!data.triggerTestEmailAction) {
+                throw createInvalidGraphQLMutationResponseError('TriggerTestEmailAction')
             }
         })
     )

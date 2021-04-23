@@ -1,23 +1,26 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import * as jsonc from '@sqs/jsonc-parser'
+import { setProperty } from '@sqs/jsonc-parser/lib/edit'
+import * as H from 'history'
 import * as React from 'react'
 import { RouteComponentProps } from 'react-router'
 import { Link } from 'react-router-dom'
 import { Subject, Subscription } from 'rxjs'
 import { catchError, concatMap, delay, mergeMap, retryWhen, tap, timeout } from 'rxjs/operators'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+
 import siteSchemaJSON from '../../../../schema/site.schema.json'
-import * as GQL from '../../../shared/src/graphql/schema'
+import { ErrorAlert } from '../components/alerts'
 import { PageTitle } from '../components/PageTitle'
+import { SiteConfiguration } from '../schema/site.schema'
 import { DynamicallyImportedMonacoSettingsEditor } from '../settings/DynamicallyImportedMonacoSettingsEditor'
 import { refreshSiteFlags } from '../site/backend'
 import { eventLogger } from '../tracking/eventLogger'
+
 import { fetchSite, reloadSite, updateSiteConfiguration } from './backend'
-import { ErrorAlert } from '../components/alerts'
-import * as jsonc from '@sqs/jsonc-parser'
-import { setProperty } from '@sqs/jsonc-parser/lib/edit'
-import * as H from 'history'
-import { SiteConfiguration } from '../schema/site.schema'
-import { ThemeProps } from '../../../shared/src/theme'
-import { TelemetryProps } from '../../../shared/src/telemetry/telemetryService'
 
 const defaultFormattingOptions: jsonc.FormattingOptions = {
     eol: '\n',
@@ -255,18 +258,23 @@ export class SiteAdminConfigurationPage extends React.Component<Props, State> {
                                 return []
                             }),
                             tap(() => {
-                                // Flipping the Campaigns feature flag
-                                // requires a reload for the
-                                // Campaigns UI to be correctly rendered in the navbar.
-                                const lastCampaignsEnabled =
-                                    (lastConfiguration &&
-                                        (jsonc.parse(lastConfiguration.effectiveContents) as SiteConfiguration)?.[
-                                            'campaigns.enabled'
-                                        ]) === true
-                                const newCampaignsEnabled =
-                                    (jsonc.parse(newContents) as SiteConfiguration)?.['campaigns.enabled'] === true
+                                const oldContents = lastConfiguration?.effectiveContents || ''
+                                const oldConfiguration = jsonc.parse(oldContents) as SiteConfiguration
+                                const newConfiguration = jsonc.parse(newContents) as SiteConfiguration
 
-                                if (lastCampaignsEnabled !== newCampaignsEnabled) {
+                                // Flipping these feature flags require a reload for the
+                                // UI to be rendered correctly in the navbar and the sidebar.
+                                const keys: (keyof SiteConfiguration)[] = [
+                                    'campaigns.enabled',
+                                    'batchChanges.enabled',
+                                    'codeIntelAutoIndexing.enabled',
+                                ]
+
+                                if (
+                                    !keys.every(
+                                        key => Boolean(oldConfiguration?.[key]) === Boolean(newConfiguration?.[key])
+                                    )
+                                ) {
                                     window.location.reload()
                                 }
                             })
@@ -329,12 +337,7 @@ export class SiteAdminConfigurationPage extends React.Component<Props, State> {
         const alerts: JSX.Element[] = []
         if (this.state.error) {
             alerts.push(
-                <ErrorAlert
-                    key="error"
-                    className="site-admin-configuration-page__alert"
-                    error={this.state.error}
-                    history={this.props.history}
-                />
+                <ErrorAlert key="error" className="site-admin-configuration-page__alert" error={this.state.error} />
             )
         }
         if (this.state.reloadStartedAt) {

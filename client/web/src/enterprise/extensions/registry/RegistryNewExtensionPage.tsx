@@ -1,29 +1,32 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import * as H from 'history'
 import AddIcon from 'mdi-react/AddIcon'
-import PuzzleIcon from 'mdi-react/PuzzleIcon'
 import HelpCircleOutline from 'mdi-react/HelpCircleOutlineIcon'
+import PuzzleIcon from 'mdi-react/PuzzleIcon'
 import * as React from 'react'
 import { RouteComponentProps } from 'react-router'
 import { concat, Observable, Subject, Subscription } from 'rxjs'
 import { catchError, concatMap, map, tap } from 'rxjs/operators'
-import { gql } from '../../../../../shared/src/graphql/graphql'
-import * as GQL from '../../../../../shared/src/graphql/schema'
-import { asError, createAggregateError, ErrorLike, isErrorLike } from '../../../../../shared/src/util/errors'
+
+import { Form } from '@sourcegraph/branded/src/components/Form'
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { Scalars } from '@sourcegraph/shared/src/graphql-operations'
+import { gql } from '@sourcegraph/shared/src/graphql/graphql'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { asError, createAggregateError, ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+
+import { AuthenticatedUser } from '../../../auth'
 import { withAuthenticatedUser } from '../../../auth/withAuthenticatedUser'
 import { mutateGraphQL } from '../../../backend/graphql'
-import { Form } from '../../../../../branded/src/components/Form'
+import { ErrorAlert } from '../../../components/alerts'
+import { BreadcrumbSetters } from '../../../components/Breadcrumbs'
 import { ModalPage } from '../../../components/ModalPage'
 import { PageTitle } from '../../../components/PageTitle'
 import { RegistryPublisher, toExtensionID } from '../../../extensions/extension/extension'
 import { eventLogger } from '../../../tracking/eventLogger'
 import { RegistryExtensionNameFormGroup, RegistryPublisherFormGroup } from '../extension/RegistryExtensionForm'
+
 import { queryViewerRegistryPublishers } from './backend'
 import { RegistryAreaPageProps } from './RegistryArea'
-import { ErrorAlert } from '../../../components/alerts'
-import * as H from 'history'
-import { AuthenticatedUser } from '../../../auth'
-import { BreadcrumbSetters } from '../../../components/Breadcrumbs'
-import { Scalars } from '../../../../../shared/src/graphql-operations'
 
 function createExtension(
     publisher: Scalars['ID'],
@@ -128,7 +131,7 @@ export const RegistryNewExtensionPage = withAuthenticatedUser(
             )
 
             this.subscriptions.add(
-                this.props.setBreadcrumb({ key: 'create-new-extension', element: <>Create new extension</> })
+                this.props.setBreadcrumb({ key: 'create-new-extension', element: <>Create extension</> })
             )
 
             this.componentUpdates.next(this.props)
@@ -182,7 +185,6 @@ export const RegistryNewExtensionPage = withAuthenticatedUser(
                                 publishersOrError={this.state.publishersOrError}
                                 onChange={this.onPublisherChange}
                                 disabled={this.state.creationOrError === 'loading'}
-                                history={this.props.history}
                             />
                             <RegistryExtensionNameFormGroup
                                 value={this.state.name}
@@ -223,11 +225,7 @@ export const RegistryNewExtensionPage = withAuthenticatedUser(
                             </button>
                         </Form>
                         {isErrorLike(this.state.creationOrError) && (
-                            <ErrorAlert
-                                className="mt-3"
-                                error={this.state.creationOrError}
-                                history={this.props.history}
-                            />
+                            <ErrorAlert className="mt-3" error={this.state.creationOrError} />
                         )}
                     </ModalPage>
                 </>

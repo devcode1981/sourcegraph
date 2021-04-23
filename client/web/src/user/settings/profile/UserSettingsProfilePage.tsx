@@ -1,15 +1,20 @@
-import React, { useCallback, useEffect } from 'react'
 import H from 'history'
-import { percentageDone } from '../../../../../shared/src/components/activation/Activation'
-import { ActivationChecklist } from '../../../../../shared/src/components/activation/ActivationChecklist'
-import { gql } from '../../../../../shared/src/graphql/graphql'
-import { isErrorLike } from '../../../../../shared/src/util/errors'
+import React, { useCallback, useEffect } from 'react'
+
+import { percentageDone } from '@sourcegraph/shared/src/components/activation/Activation'
+import { ActivationChecklist } from '@sourcegraph/shared/src/components/activation/ActivationChecklist'
+import { gql } from '@sourcegraph/shared/src/graphql/graphql'
+import { isErrorLike } from '@sourcegraph/shared/src/util/errors'
+
 import { refreshAuthenticatedUser } from '../../../auth'
+import { PageHeader } from '../../../components/PageHeader'
 import { PageTitle } from '../../../components/PageTitle'
-import { eventLogger } from '../../../tracking/eventLogger'
+import { Timestamp } from '../../../components/time/Timestamp'
 import { EditUserProfilePage as EditUserProfilePageFragment } from '../../../graphql-operations'
-import { EditUserProfileForm } from './EditUserProfileForm'
+import { eventLogger } from '../../../tracking/eventLogger'
 import { UserSettingsAreaRouteContext } from '../UserSettingsArea'
+
+import { EditUserProfileForm } from './EditUserProfileForm'
 
 export const EditUserProfilePageGQLFragment = gql`
     fragment EditUserProfilePage on User {
@@ -18,6 +23,7 @@ export const EditUserProfilePageGQLFragment = gql`
         displayName
         avatarURL
         viewerCanChangeUsername
+        createdAt
     }
 `
 
@@ -57,8 +63,21 @@ export const UserSettingsProfilePage: React.FunctionComponent<Props> = ({
     return (
         <div className="user-settings-profile-page">
             <PageTitle title="Profile" />
-            <h2>Profile</h2>
-
+            <PageHeader
+                path={[{ text: 'Profile' }]}
+                headingElement="h2"
+                className="user-settings-profile-page__heading"
+            />
+            <p>
+                {user.displayName ? (
+                    <>
+                        {user.displayName} ({user.username})
+                    </>
+                ) : (
+                    user.username
+                )}{' '}
+                started using Sourcegraph <Timestamp date={user.createdAt} />.
+            </p>
             {props.activation?.completed && percentageDone(props.activation.completed) < 100 && (
                 <div className="card mb-3">
                     <div className="card-body">

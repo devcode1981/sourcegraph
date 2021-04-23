@@ -41,6 +41,7 @@ type MergeRequest struct {
 	TargetBranch   string            `json:"target_branch"`
 	WebURL         string            `json:"web_url"`
 	WorkInProgress bool              `json:"work_in_progress"`
+	Author         User              `json:"author"`
 
 	DiffRefs DiffRefs `json:"diff_refs"`
 
@@ -80,7 +81,6 @@ type DiffRefs struct {
 
 var (
 	ErrMergeRequestAlreadyExists = errors.New("merge request already exists")
-	ErrMergeRequestNotFound      = errors.New("merge request not found")
 	ErrTooManyMergeRequests      = errors.New("retrieved too many merge requests")
 )
 
@@ -136,6 +136,13 @@ func (c *Client) GetMergeRequest(ctx context.Context, project *Project, iid ID) 
 
 	resp := &MergeRequest{}
 	if _, _, err := c.do(ctx, req, resp); err != nil {
+		if e, ok := errors.Cause(err).(HTTPError); ok && e.Code() == http.StatusNotFound {
+			if strings.Contains(e.Message(), "Project Not Found") {
+				err = ErrProjectNotFound
+			} else {
+				err = ErrMergeRequestNotFound
+			}
+		}
 		return nil, errors.Wrap(err, "sending request to get a merge request")
 	}
 
@@ -231,4 +238,38 @@ func (c *Client) UpdateMergeRequest(ctx context.Context, project *Project, mr *M
 	}
 
 	return resp, nil
+}
+
+func (c *Client) CreateMergeRequestNote(ctx context.Context, project *Project, mr *MergeRequest, body string) error {
+	if MockCreateMergeRequestNote != nil {
+		return MockCreateMergeRequestNote(c, ctx, project, mr, body)
+	}
+
+	var payload struct {
+		Body string `json:"body"`
+	} = struct {
+		Body string `json:"body"`
+	}{
+		Body: body,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return errors.Wrap(err, "marshalling payload")
+	}
+
+	time.Sleep(c.rateLimitMonitor.RecommendedWaitForBackgroundOp(1))
+
+	req, err := http.NewRequest("POST", fmt.Sprintf("projects/%d/merge_requests/%d/notes", project.ID, mr.IID), bytes.NewBuffer(data))
+	if err != nil {
+		return errors.Wrap(err, "creating request to comment on a merge request")
+	}
+
+	var resp struct {
+		ID int32 `json:"id"`
+	}
+	if _, _, err := c.do(ctx, req, &resp); err != nil {
+		return errors.Wrap(err, "sending request to comment on a merge request")
+	}
+
+	return nil
 }

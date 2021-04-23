@@ -14,11 +14,12 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/pkg/errors"
+	"go.uber.org/automaxprocs/maxprocs"
+
 	"github.com/sourcegraph/sourcegraph/internal/conf"
 	"github.com/sourcegraph/sourcegraph/internal/env"
 	"github.com/sourcegraph/sourcegraph/internal/trace"
 	"github.com/sourcegraph/sourcegraph/internal/trace/ot"
-	"go.uber.org/automaxprocs/maxprocs"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go"
@@ -233,12 +234,6 @@ func (t *switchableTracer) set(tracer opentracing.Tracer, tracerCloser io.Closer
 	t.tracerCloser = tracerCloser
 	t.tracer = tracer
 	t.log = log
-}
-
-func (t *switchableTracer) get() (tracer opentracing.Tracer, log bool) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.tracer, t.log
 }
 
 const tracingNotEnabledURL = "#tracing_not_enabled_for_this_request_add_?trace=1_to_url_to_enable"

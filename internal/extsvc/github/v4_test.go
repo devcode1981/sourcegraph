@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/pkg/errors"
+
 	"github.com/sourcegraph/sourcegraph/internal/extsvc/auth"
 	"github.com/sourcegraph/sourcegraph/internal/httptestutil"
 	"github.com/sourcegraph/sourcegraph/internal/testutil"
@@ -60,6 +61,24 @@ func TestUnmarshal(t *testing.T) {
 			t.Errorf("Unexpected error message %v\ngot:  %s\nwant: %s", data, got, errStr)
 		}
 	}
+}
+
+func TestGetAuthenticatedUserV4(t *testing.T) {
+	cli, save := newV4Client(t, "GetAuthenticatedUserV4")
+	defer save()
+
+	ctx := context.Background()
+
+	user, err := cli.GetAuthenticatedUser(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testutil.AssertGolden(t,
+		"testdata/golden/GetAuthenticatedUserV4",
+		update("GetAuthenticatedUserV4"),
+		user,
+	)
 }
 
 func TestLoadPullRequest(t *testing.T) {
@@ -345,6 +364,21 @@ func TestMarkPullRequestReadyForReview(t *testing.T) {
 				tc.pr,
 			)
 		})
+	}
+}
+
+func TestCreatePullRequestComment(t *testing.T) {
+	cli, save := newV4Client(t, "CreatePullRequestComment")
+	defer save()
+
+	pr := &PullRequest{
+		// https://github.com/sourcegraph/automation-testing/pull/44
+		ID: "MDExOlB1bGxSZXF1ZXN0MzQxMDU5OTY5",
+	}
+
+	err := cli.CreatePullRequestComment(context.Background(), pr, "test-comment")
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

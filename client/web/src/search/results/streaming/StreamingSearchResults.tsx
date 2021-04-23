@@ -1,127 +1,151 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import classNames from 'classnames'
 import * as H from 'history'
-import FileIcon from 'mdi-react/FileIcon'
-import SearchIcon from 'mdi-react/SearchIcon'
-import SourceRepositoryIcon from 'mdi-react/SourceRepositoryIcon'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Observable } from 'rxjs'
-import { FetchFileParameters } from '../../../../../shared/src/components/CodeExcerpt'
-import { FileMatch } from '../../../../../shared/src/components/FileMatch'
-import { VirtualList } from '../../../../../shared/src/components/VirtualList'
-import { ExtensionsControllerProps } from '../../../../../shared/src/extensions/controller'
-import { SearchPatternType } from '../../../../../shared/src/graphql-operations'
-import * as GQL from '../../../../../shared/src/graphql/schema'
-import { PlatformContextProps } from '../../../../../shared/src/platform/context'
-import { VersionContextProps } from '../../../../../shared/src/search/util'
-import { SettingsCascadeProps } from '../../../../../shared/src/settings/settings'
-import { TelemetryProps } from '../../../../../shared/src/telemetry/telemetryService'
-import { ThemeProps } from '../../../../../shared/src/theme'
-import { isDefined } from '../../../../../shared/src/util/types'
-import { useObservable } from '../../../../../shared/src/util/useObservable'
+import { debounceTime } from 'rxjs/operators'
+
+import { FetchFileParameters } from '@sourcegraph/shared/src/components/CodeExcerpt'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { SearchPatternType } from '@sourcegraph/shared/src/graphql-operations'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { updateFilters } from '@sourcegraph/shared/src/search/query/transformer'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { asError } from '@sourcegraph/shared/src/util/errors'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
+import { useRedesignToggle } from '@sourcegraph/shared/src/util/useRedesignToggle'
+
+import {
+    CaseSensitivityProps,
+    PatternTypeProps,
+    SearchStreamingProps,
+    resolveVersionContext,
+    ParsedSearchQueryProps,
+    MutableVersionContextProps,
+} from '../..'
 import { AuthenticatedUser } from '../../../auth'
+import { CodeMonitoringProps } from '../../../code-monitoring'
 import { PageTitle } from '../../../components/PageTitle'
-import { SearchResult } from '../../../components/SearchResult'
 import { SavedSearchModal } from '../../../savedSearches/SavedSearchModal'
-import { VersionContext } from '../../../schema/site.schema'
 import { QueryState, submitSearch } from '../../helpers'
+import { queryTelemetryData } from '../../queryTelemetry'
 import { SearchAlert } from '../SearchAlert'
 import { LATEST_VERSION } from '../SearchResults'
 import { SearchResultsInfoBar } from '../SearchResultsInfoBar'
 import { SearchResultTypeTabs } from '../SearchResultTypeTabs'
 import { VersionContextWarning } from '../VersionContextWarning'
+
 import { StreamingProgress } from './progress/StreamingProgress'
+import { SearchSidebar } from './sidebar/SearchSidebar'
+import styles from './StreamingSearchResults.module.scss'
 import { StreamingSearchResultsFilterBars } from './StreamingSearchResultsFilterBars'
-import {
-    CaseSensitivityProps,
-    parseSearchURL,
-    PatternTypeProps,
-    SearchStreamingProps,
-    resolveVersionContext,
-} from '../..'
-import { ErrorAlert } from '../../../components/alerts'
-import { eventLogger } from '../../../tracking/eventLogger'
+import { StreamingSearchResultsList } from './StreamingSearchResultsList'
 
 export interface StreamingSearchResultsProps
     extends SearchStreamingProps,
-        PatternTypeProps,
-        VersionContextProps,
-        CaseSensitivityProps,
+        Pick<ParsedSearchQueryProps, 'parsedSearchQuery'>,
+        Pick<PatternTypeProps, 'patternType'>,
+        Pick<MutableVersionContextProps, 'versionContext' | 'availableVersionContexts' | 'previousVersionContext'>,
+        Pick<CaseSensitivityProps, 'caseSensitive'>,
         SettingsCascadeProps,
-        ExtensionsControllerProps<'executeCommand' | 'extHostAPI' | 'services'>,
+        ExtensionsControllerProps<'executeCommand' | 'extHostAPI'>,
         PlatformContextProps<'forceUpdateTooltip' | 'settings'>,
         TelemetryProps,
-        ThemeProps {
+        ThemeProps,
+        CodeMonitoringProps {
     authenticatedUser: AuthenticatedUser | null
     location: H.Location
     history: H.History
     navbarSearchQueryState: QueryState
 
-    setVersionContext: (versionContext: string | undefined) => void
-    availableVersionContexts: VersionContext[] | undefined
-    previousVersionContext: string | null
-
     fetchHighlightedFileLineRanges: (parameters: FetchFileParameters, force?: boolean) => Observable<string[][]>
 }
 
-const initialItemsToShow = 15
-const incrementalItemsToShow = 10
-
 export const StreamingSearchResults: React.FunctionComponent<StreamingSearchResultsProps> = props => {
     const {
-        patternType: currentPatternType,
-        setPatternType,
-        caseSensitive: currentCaseSensitive,
-        setCaseSensitivity,
-        versionContext: currentVersionContext,
-        setVersionContext,
+        parsedSearchQuery: query,
+        patternType,
+        caseSensitive,
+        versionContext,
         streamSearch,
         location,
         history,
         availableVersionContexts,
         previousVersionContext,
         authenticatedUser,
+        telemetryService,
     } = props
 
-    const { query = '', patternType, caseSensitive, versionContext } = parseSearchURL(props.location.search)
+    // Log view event on first load
+    useEffect(
+        () => {
+            telemetryService.logViewEvent('SearchResults')
+        },
+        // Only log view on initial load
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        []
+    )
 
+    // Log search query event when URL changes
     useEffect(() => {
-        if (patternType && patternType !== currentPatternType) {
-            setPatternType(patternType)
+        const query_data = queryTelemetryData(query, caseSensitive)
+        telemetryService.log('SearchResultsQueried', {
+            code_search: { query_data },
+        })
+        if (query_data.query?.field_type && query_data.query.field_type.value_diff > 0) {
+            telemetryService.log('DiffSearchResultsQueried')
         }
-    }, [patternType, currentPatternType, setPatternType])
+    }, [caseSensitive, query, telemetryService])
 
-    useEffect(() => {
-        if (caseSensitive && caseSensitive !== currentCaseSensitive) {
-            setCaseSensitivity(caseSensitive)
-        }
-    }, [caseSensitive, currentCaseSensitive, setCaseSensitivity])
-
-    useEffect(() => {
-        const resolvedContext = resolveVersionContext(versionContext, availableVersionContexts)
-        if (resolvedContext !== currentVersionContext) {
-            setVersionContext(resolvedContext)
-        }
-    }, [versionContext, currentVersionContext, setVersionContext, availableVersionContexts])
-
+    const trace = useMemo(() => new URLSearchParams(location.search).get('trace') ?? undefined, [location.search])
     const results = useObservable(
         useMemo(
             () =>
-                streamSearch(
+                streamSearch({
                     query,
-                    LATEST_VERSION,
-                    patternType ?? SearchPatternType.literal,
-                    resolveVersionContext(versionContext, availableVersionContexts)
-                ),
-            [streamSearch, query, patternType, versionContext, availableVersionContexts]
+                    version: LATEST_VERSION,
+                    patternType: patternType ?? SearchPatternType.literal,
+                    caseSensitive,
+                    versionContext: resolveVersionContext(versionContext, availableVersionContexts),
+                    trace,
+                }).pipe(debounceTime(500)),
+            [streamSearch, query, patternType, caseSensitive, versionContext, availableVersionContexts, trace]
         )
     )
 
+    // Log events when search completes or fails
+    useEffect(() => {
+        if (results?.state === 'complete') {
+            telemetryService.log('SearchResultsFetched', {
+                code_search: {
+                    // 🚨 PRIVACY: never provide any private data in { code_search: { results } }.
+                    results: {
+                        results_count: results.results.length,
+                        any_cloning: results.progress.skipped.some(skipped => skipped.reason === 'repository-cloning'),
+                    },
+                },
+            })
+        } else if (results?.state === 'error') {
+            telemetryService.log('SearchResultsFetchFailed', {
+                code_search: { error_message: asError(results.error).message },
+            })
+            console.error(results.error)
+        }
+    }, [results, telemetryService])
+
     const [allExpanded, setAllExpanded] = useState(false)
-    const onExpandAllResultsToggle = useCallback(() => setAllExpanded(oldValue => !oldValue), [setAllExpanded])
+    const onExpandAllResultsToggle = useCallback(() => {
+        setAllExpanded(oldValue => !oldValue)
+        telemetryService.log(allExpanded ? 'allResultsExpanded' : 'allResultsCollapsed')
+    }, [allExpanded, telemetryService])
 
     const [showSavedSearchModal, setShowSavedSearchModal] = useState(false)
     const onSaveQueryClick = useCallback(() => setShowSavedSearchModal(true), [])
-    const onSaveQueryModalClose = useCallback(() => setShowSavedSearchModal(false), [])
+    const onSaveQueryModalClose = useCallback(() => {
+        setShowSavedSearchModal(false)
+        telemetryService.log('SavedQueriesToggleCreating', { queries: { creating: false } })
+    }, [telemetryService])
 
     const [showVersionContextWarning, setShowVersionContextWarning] = useState(false)
     useEffect(
@@ -153,64 +177,49 @@ export const StreamingSearchResults: React.FunctionComponent<StreamingSearchResu
         setShowVersionContextWarning,
     ])
 
-    const [itemsToShow, setItemsToShow] = useState(initialItemsToShow)
-    const onBottomHit = useCallback(
-        () => setItemsToShow(items => Math.min(results?.results.length || 0, items + incrementalItemsToShow)),
-        [results?.results.length]
-    )
-    const logSearchResultClicked = useCallback(() => props.telemetryService.log('SearchResultClicked'), [
-        props.telemetryService,
-    ])
-    const renderResult = (result: GQL.GenericSearchResultInterface | GQL.IFileMatch): JSX.Element | undefined => {
-        switch (result.__typename) {
-            case 'FileMatch':
-                return (
-                    <FileMatch
-                        key={'file:' + result.file.url}
-                        location={location}
-                        eventLogger={eventLogger}
-                        icon={result.lineMatches && result.lineMatches.length > 0 ? SourceRepositoryIcon : FileIcon}
-                        result={result}
-                        onSelect={logSearchResultClicked}
-                        expanded={false}
-                        showAllMatches={false}
-                        isLightTheme={props.isLightTheme}
-                        allExpanded={allExpanded}
-                        fetchHighlightedFileLineRanges={props.fetchHighlightedFileLineRanges}
-                        settingsCascade={props.settingsCascade}
-                    />
-                )
-        }
-        return (
-            <SearchResult key={result.url} result={result} isLightTheme={props.isLightTheme} history={props.history} />
-        )
-    }
+    // Reset expanded state when new search is started
+    useEffect(() => {
+        setAllExpanded(false)
+    }, [location.search])
 
     const onSearchAgain = useCallback(
         (additionalFilters: string[]) => {
-            const newQuery = [query, ...additionalFilters].join(' ')
-            submitSearch({ ...props, query: newQuery, source: 'excludedResults' })
+            telemetryService.log('SearchSkippedResultsAgainClicked')
+            submitSearch({
+                ...props,
+                query: applyAdditionalFilters(query, additionalFilters),
+                source: 'excludedResults',
+            })
         },
-        [query, props]
+        [query, telemetryService, props]
     )
 
+    const [isRedesignEnabled] = useRedesignToggle()
+
     return (
-        <div className="test-search-results search-results d-flex flex-column w-100">
+        <div className={classNames('test-search-results search-results', styles.streamingSearchResults)}>
             <PageTitle key="page-title" title={query} />
-            <StreamingSearchResultsFilterBars {...props} results={results} />
+
+            {isRedesignEnabled ? (
+                <SearchSidebar {...props} query={props.navbarSearchQueryState.query} />
+            ) : (
+                <StreamingSearchResultsFilterBars {...props} results={results} />
+            )}
             <div className="search-results-list">
                 <div className="d-lg-flex mb-2 align-items-end flex-wrap">
-                    <SearchResultTypeTabs
-                        {...props}
-                        query={props.navbarSearchQueryState.query}
-                        className="search-results-list__tabs"
-                    />
+                    {!isRedesignEnabled && (
+                        <SearchResultTypeTabs
+                            {...props}
+                            query={props.navbarSearchQueryState.query}
+                            className="search-results-list__tabs"
+                        />
+                    )}
 
                     <SearchResultsInfoBar
                         {...props}
                         query={query}
                         resultsFound={results ? results.results.length > 0 : false}
-                        className="border-bottom flex-grow-1"
+                        className={classNames('flex-grow-1', { 'border-bottom': !isRedesignEnabled })}
                         allExpanded={allExpanded}
                         onExpandAllResultsToggle={onExpandAllResultsToggle}
                         onSaveQueryClick={onSaveQueryClick}
@@ -218,7 +227,9 @@ export const StreamingSearchResults: React.FunctionComponent<StreamingSearchResu
                             <StreamingProgress
                                 progress={results?.progress || { durationMs: 0, matchCount: 0, skipped: [] }}
                                 state={results?.state || 'loading'}
+                                history={props.history}
                                 onSearchAgain={onSearchAgain}
+                                showTrace={!!trace}
                             />
                         }
                     />
@@ -226,7 +237,7 @@ export const StreamingSearchResults: React.FunctionComponent<StreamingSearchResu
 
                 {showVersionContextWarning && (
                     <VersionContextWarning
-                        versionContext={currentVersionContext}
+                        versionContext={versionContext}
                         onDismissWarning={onDismissVersionContextWarning}
                     />
                 )}
@@ -249,41 +260,17 @@ export const StreamingSearchResults: React.FunctionComponent<StreamingSearchResu
                     />
                 )}
 
-                {/* Results */}
-                <VirtualList
-                    className="mt-2"
-                    itemsToShow={itemsToShow}
-                    onShowMoreItems={onBottomHit}
-                    items={results?.results.map(result => renderResult(result)).filter(isDefined) || []}
-                />
-
-                {(!results || results?.state === 'loading') && (
-                    <div className="text-center my-4" data-testid="loading-container">
-                        <LoadingSpinner className="icon-inline" />
-                    </div>
-                )}
-
-                {results?.state === 'error' && (
-                    <ErrorAlert
-                        className="m-2"
-                        data-testid="search-results-list-error"
-                        error={results.error}
-                        history={history}
-                    />
-                )}
-
-                {results?.state === 'complete' && !results?.alert && results?.results.length === 0 && (
-                    <div className="alert alert-info d-flex m-2">
-                        <h3 className="m-0">
-                            <SearchIcon className="icon-inline" /> No results
-                        </h3>
-                    </div>
-                )}
-
-                {results?.state === 'complete' && results?.results.length > 0 && (
-                    <small className="d-block my-4 text-center">Showing {results?.results.length} results</small>
-                )}
+                <StreamingSearchResultsList {...props} results={results} allExpanded={allExpanded} />
             </div>
         </div>
     )
+}
+
+const applyAdditionalFilters = (query: string, additionalFilters: string[]): string => {
+    let newQuery = query
+    for (const filter of additionalFilters) {
+        const fieldValue = filter.split(':', 2)
+        newQuery = updateFilters(newQuery, fieldValue[0], fieldValue[1])
+    }
+    return newQuery
 }

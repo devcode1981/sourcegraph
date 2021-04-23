@@ -12,7 +12,7 @@ import (
 	"github.com/keegancsmith/sqlf"
 	"github.com/opentracing/opentracing-go/log"
 
-	"github.com/sourcegraph/sourcegraph/internal/db/basestore"
+	"github.com/sourcegraph/sourcegraph/internal/database/basestore"
 	"github.com/sourcegraph/sourcegraph/internal/observation"
 	"github.com/sourcegraph/sourcegraph/internal/workerutil"
 )
@@ -117,7 +117,7 @@ type Options struct {
 	// and types:
 	//
 	//   - id: integer primary key
-	//   - state: an enum type containing at least `queued`, `processing`, `errored`, and `failed`
+	//   - state: text (may be updated to `queued`, `processing`, `errored`, or `failed`)
 	//   - failure_message: text
 	//   - started_at: timestamp with time zone
 	//   - finished_at: timestamp with time zone
@@ -235,7 +235,7 @@ func newStore(handle *basestore.TransactableHandle, options Options, observation
 		Store:          basestore.NewWithHandle(handle),
 		options:        options,
 		columnReplacer: strings.NewReplacer(replacements...),
-		operations:     makeOperations(options.Name, observationContext),
+		operations:     newOperations(options.Name, observationContext),
 	}
 }
 

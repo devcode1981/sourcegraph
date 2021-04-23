@@ -7,16 +7,6 @@ $border-radius-lg: 4px;
 $font-size-base: 0.875rem;
 $line-height-base: (20/14);
 
-// Media breakpoints
-$media-sm: 576px;
-$media-md: 768px;
-$media-lg: 992px;
-$media-xl: 1200px;
-
-$theme-colors-light: (
-    'secondary': $secondary-light,
-);
-
 :root {
     --border-color: rgba(0, 0, 0, 0.125);
     --mark-bg: #{$mark-bg-light};
@@ -55,6 +45,7 @@ $theme-colors-light: (
 @import './shared/code-hosts/gitlab/style.scss';
 @import './shared/code-hosts/github/style.scss';
 @import './shared/code-hosts/phabricator/style.scss';
+@import './shared/code-hosts/gerrit/style.scss';
 @import './shared/code-hosts/shared/HoverOverlay.scss';
 @import './shared/code-hosts/shared/ViewOnSourcegraphButton';
 @import './shared/code-hosts/shared/nativeTooltips';

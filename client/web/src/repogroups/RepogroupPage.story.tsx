@@ -1,20 +1,22 @@
-import { storiesOf } from '@storybook/react'
-import { RepogroupPage, RepogroupPageProps } from './RepogroupPage'
-import React from 'react'
-import { python2To3Metadata } from './Python2To3'
-import * as GQL from '../../../shared/src/graphql/schema'
-import { NEVER } from 'rxjs'
-import { NOOP_SETTINGS_CASCADE } from '../../../shared/src/util/searchTestHelpers'
-import { ThemePreference } from '../theme'
-import { NOOP_TELEMETRY_SERVICE } from '../../../shared/src/telemetry/telemetryService'
-import { ActionItemComponentProps } from '../../../shared/src/actions/ActionItem'
-import { Services } from '../../../shared/src/api/client/services'
-import { AuthenticatedUser } from '../auth'
-import { SearchPatternType } from '../graphql-operations'
-import { WebStory } from '../components/WebStory'
-import { subtypeOf } from '../../../shared/src/util/types'
 import { action } from '@storybook/addon-actions'
+import { storiesOf } from '@storybook/react'
+import React from 'react'
+import { NEVER } from 'rxjs'
+
+import { ActionItemComponentProps } from '@sourcegraph/shared/src/actions/ActionItem'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { NOOP_SETTINGS_CASCADE } from '@sourcegraph/shared/src/util/searchTestHelpers'
+import { subtypeOf } from '@sourcegraph/shared/src/util/types'
+
+import { AuthenticatedUser } from '../auth'
+import { WebStory } from '../components/WebStory'
+import { SearchPatternType } from '../graphql-operations'
+import { mockFetchAutoDefinedSearchContexts, mockFetchSearchContexts } from '../searchContexts/testHelpers'
+import { ThemePreference } from '../theme'
+
 import { cncf } from './cncf'
+import { python2To3Metadata } from './Python2To3'
+import { RepogroupPage, RepogroupPageProps } from './RepogroupPage'
 
 const { add } = storiesOf('web/RepogroupPage', module).addParameters({
     design: {
@@ -73,33 +75,38 @@ const commonProps = () =>
             },
         },
         onThemePreferenceChange: action('onThemePreferenceChange'),
+        parsedSearchQuery: 'r:golang/oauth2 test f:travis',
         patternType: SearchPatternType.literal,
         setPatternType: action('setPatternType'),
         caseSensitive: false,
         copyQueryButton: false,
-        extensionsController: { ...EXTENSIONS_CONTROLLER, services: {} as Services },
+        extensionsController: { ...EXTENSIONS_CONTROLLER },
         platformContext: PLATFORM_CONTEXT,
-        filtersInQuery: {},
-        interactiveSearchMode: false,
         keyboardShortcuts: [],
-        onFiltersInQueryChange: action('onFiltersInQueryChange'),
         setCaseSensitivity: action('setCaseSensitivity'),
-        splitSearchModes: false,
-        telemetryService: NOOP_TELEMETRY_SERVICE,
-        toggleSearchMode: action('toggleSearchMode'),
         versionContext: undefined,
         activation: undefined,
         isSourcegraphDotCom: true,
-        setVersionContext: action('setVersionContext'),
+        setVersionContext: () => {
+            action('setVersionContext')
+            return Promise.resolve()
+        },
         availableVersionContexts: [],
+        showSearchContext: false,
+        showSearchContextManagement: false,
+        selectedSearchContextSpec: '',
+        setSelectedSearchContextSpec: () => {},
+        defaultSearchContextSpec: '',
         authRequired: false,
-        showCampaigns: false,
+        showBatchChanges: false,
         authenticatedUser: authUser,
         repogroupMetadata: python2To3Metadata,
         globbing: false,
         enableSmartQuery: false,
         showOnboardingTour: false,
         showQueryBuilder: false,
+        fetchAutoDefinedSearchContexts: mockFetchAutoDefinedSearchContexts(),
+        fetchSearchContexts: mockFetchSearchContexts,
     })
 
 add('Refactor Python 2 to 3', () => (

@@ -15,9 +15,9 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/sourcegraph/sourcegraph/internal/api"
-	idb "github.com/sourcegraph/sourcegraph/internal/db"
-	"github.com/sourcegraph/sourcegraph/internal/db/basestore"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbutil"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/basestore"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	"github.com/sourcegraph/sourcegraph/internal/logging"
 	"github.com/sourcegraph/sourcegraph/internal/trace"
 	"github.com/sourcegraph/sourcegraph/internal/types"
@@ -33,10 +33,10 @@ type Store struct {
 	Metrics StoreMetrics
 	// Used for tracing calls to store methods. Uses opentracing.GlobalTracer() by default.
 	Tracer trace.Tracer
-	// RepoStore is a db.RepoStore using the same database handle.
-	RepoStore *idb.RepoStore
-	// ExternalServiceStore is a db.ExternalServiceStore using the same database handle.
-	ExternalServiceStore *idb.ExternalServiceStore
+	// RepoStore is a database.RepoStore using the same database handle.
+	RepoStore *database.RepoStore
+	// ExternalServiceStore is a database.ExternalServiceStore using the same database handle.
+	ExternalServiceStore *database.ExternalServiceStore
 	// Used to mock calls to certain methods.
 	Mocks MockStore
 
@@ -49,8 +49,8 @@ func NewStore(db dbutil.DB, txOpts sql.TxOptions) *Store {
 	s := basestore.NewWithDB(db, txOpts)
 	return &Store{
 		Store:                s,
-		RepoStore:            idb.NewRepoStoreWith(s),
-		ExternalServiceStore: idb.NewExternalServicesStoreWith(s),
+		RepoStore:            database.ReposWith(s),
+		ExternalServiceStore: database.ExternalServicesWith(s),
 		Log:                  log15.Root(),
 		Tracer:               trace.Tracer{Tracer: opentracing.GlobalTracer()},
 	}
@@ -243,8 +243,6 @@ func (s *Store) UpsertSources(ctx context.Context, inserts, updates, deletes map
 
 	var q *sqlf.Query
 
-	// When upserting sources we only want to perform delete statements when there are actual deletes that need to happen
-	// so that we don't inadvertently trigger trig_soft_delete_orphan_repo_by_external_service_repo
 	if len(deletes) > 0 {
 		deletedSources := makeSourceSlices(deletes)
 		q = sqlf.Sprintf(upsertSourcesWithDeletesQueryFmtstr,
@@ -273,7 +271,18 @@ func (s *Store) UpsertSources(ctx context.Context, inserts, updates, deletes map
 		)
 	}
 
-	return s.Exec(ctx, q)
+	err = s.Exec(ctx, q)
+	if err != nil {
+		return err
+	}
+
+	if len(deletes) > 0 {
+		// if we deleted some sources we must manually run the soft_delete_orphan_repo_by_external_service_repos function
+		// to cleanup orphaned repos
+		return s.Exec(ctx, sqlf.Sprintf(`SELECT soft_delete_orphan_repo_by_external_service_repos()`))
+	}
+
+	return nil
 }
 
 var upsertSourcesQueryFmtstr = upsertSourcesFmtstrPrefix + upsertSourcesFmtstrSuffix
@@ -307,12 +316,15 @@ update_sources AS (
 INSERT INTO external_service_repos (
   external_service_id,
   repo_id,
+  user_id,
   clone_url
 ) SELECT
   external_service_id,
   repo_id,
+  es.namespace_user_id,
   clone_url
 FROM inserted_sources_list
+JOIN external_services es ON (id = external_service_id)
 ON CONFLICT ON CONSTRAINT external_service_repos_repo_id_external_service_id_unique
 DO
   UPDATE SET clone_url = EXCLUDED.clone_url
@@ -377,33 +389,6 @@ not_cloned AS (
 UPDATE repo
 SET cloned = true
 WHERE repo.id IN (SELECT id FROM cloned_repos) AND NOT cloned
-`
-
-// CountNotClonedRepos returns the number of repos whose cloned column is true.
-func (s *Store) CountNotClonedRepos(ctx context.Context) (count uint64, err error) {
-	tr, ctx := s.trace(ctx, "Store.CountNotClonedRepos")
-
-	defer func(began time.Time) {
-		secs := time.Since(began).Seconds()
-
-		s.Metrics.CountNotClonedRepos.Observe(secs, float64(count), &err)
-		logging.Log(s.Log, "store.count-not-cloned-repos", &err, "count", count)
-
-		tr.SetError(err)
-		tr.Finish()
-	}(time.Now())
-
-	q := sqlf.Sprintf(CountNotClonedReposQueryFmtstr)
-	c, ok, err := basestore.ScanFirstInt(s.Query(ctx, q))
-	if err != nil || !ok {
-		return 0, err
-	}
-	return uint64(c), nil
-}
-
-const CountNotClonedReposQueryFmtstr = `
--- source: internal/repos/store.go:DBStore.CountNotClonedRepos
-SELECT COUNT(*) FROM repo WHERE deleted_at IS NULL AND NOT cloned
 `
 
 // CountUserAddedRepos counts the total number of repos that have been added
@@ -493,12 +478,12 @@ func (s *Store) list(ctx context.Context, q *sqlf.Query, scan scanFunc) (last, c
 	return scanAll(rows, scan)
 }
 
-// UpsertRepos updates or inserts the given repos in the Sourcegraph repository store.
-// The ID field is used to distinguish between Repos that need to be updated and types.Repos
-// that need to be inserted. On inserts, the _ID field of each given Repo is set on inserts.
-// The cloned column is not updated by this function.
-// This method does NOT update sources in the external_services_repo table.
-// Use UpsertSources for that purpose.
+// UpsertRepos updates or inserts the given repos in the Sourcegraph repository
+// store. The ID field is used to distinguish between Repos that need to be
+// updated and types.Repos that need to be inserted. On inserts, the _ID field of
+// each given Repo is set on inserts. The cloned column is not updated by this
+// function. This method does NOT update sources in the external_services_repo
+// table. Use UpsertSources for that purpose.
 func (s *Store) UpsertRepos(ctx context.Context, repos ...*types.Repo) (err error) {
 	if s.Mocks.UpsertRepos != nil {
 		return s.Mocks.UpsertRepos(ctx, repos...)
@@ -597,7 +582,23 @@ func (s *Store) UpsertRepos(ctx context.Context, repos ...*types.Repo) (err erro
 	return nil
 }
 
-func (s *Store) EnqueueSyncJobs(ctx context.Context, ignoreSiteAdmin bool) (err error) {
+// EnqueueSingleSyncJob enqueues a single sync job for the given external
+// service if it is not already queued or processing.
+func (s *Store) EnqueueSingleSyncJob(ctx context.Context, id int64) (err error) {
+	q := sqlf.Sprintf(`
+INSERT INTO external_service_sync_jobs (external_service_id)
+SELECT %s
+WHERE NOT EXISTS(
+        SELECT 1
+        FROM external_service_sync_jobs
+        WHERE external_service_id = %s
+          AND state IN ('queued', 'processing'))
+`, id, id)
+	return s.Exec(ctx, q)
+}
+
+// EnqueueSyncJobs enqueues sync jobs for all external services that are due.
+func (s *Store) EnqueueSyncJobs(ctx context.Context, isCloud bool) (err error) {
 	tr, ctx := s.trace(ctx, "Store.EnqueueSyncJobs")
 
 	defer func(began time.Time) {
@@ -608,8 +609,10 @@ func (s *Store) EnqueueSyncJobs(ctx context.Context, ignoreSiteAdmin bool) (err 
 	}(time.Now())
 
 	filter := "TRUE"
-	if ignoreSiteAdmin {
-		filter = "namespace_user_id IS NOT NULL"
+	// On Cloud we don't sync our default sources in the background, they are synced
+	// on demand instead.
+	if isCloud {
+		filter = "cloud_default = false"
 	}
 	q := sqlf.Sprintf(enqueueSyncJobsQueryFmtstr, sqlf.Sprintf(filter))
 	return s.Exec(ctx, q)

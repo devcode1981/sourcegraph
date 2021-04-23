@@ -1,13 +1,16 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import classNames from 'classnames'
 import * as H from 'history'
 import React, { useCallback, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Form } from '../../../branded/src/components/Form'
-import { eventLogger } from '../tracking/eventLogger'
-import { getReturnTo, PasswordInput } from './SignInSignUpCommon'
-import { asError } from '../../../shared/src/util/errors'
-import classNames from 'classnames'
+
+import { Form } from '@sourcegraph/branded/src/components/Form'
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { asError } from '@sourcegraph/shared/src/util/errors'
+
 import { SourcegraphContext } from '../jscontext'
+import { eventLogger } from '../tracking/eventLogger'
+
+import { getReturnTo, PasswordInput } from './SignInSignUpCommon'
 
 interface Props {
     location: H.Location
@@ -103,7 +106,10 @@ export const UsernamePasswordSignInForm: React.FunctionComponent<Props> = ({
                         disabled={loading}
                         autoCapitalize="off"
                         autoFocus={true}
-                        autoComplete="username email"
+                        // There is no well supported way to declare username OR email here.
+                        // Using username seems to be the best approach and should still support this behaviour.
+                        // See: https://github.com/whatwg/html/issues/4445
+                        autoComplete="username"
                     />
                 </div>
                 <div className="form-group d-flex flex-column align-content-start">

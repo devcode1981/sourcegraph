@@ -1,8 +1,10 @@
 import { parseISO } from 'date-fns'
 import format from 'date-fns/format'
 import React from 'react'
-import * as GQL from '../../../../../shared/src/graphql/schema'
-import { formatRelativeExpirationDate, isProductLicenseExpired } from '../../productSubscription/helpers'
+
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+
+import { formatRelativeExpirationDate, isProductLicenseExpired } from '../../../productSubscription/helpers'
 
 /**
  * Displays an alert indicating the validity of a product license.

@@ -11,7 +11,8 @@ import (
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend/graphqlutil"
 	"github.com/sourcegraph/sourcegraph/internal/api"
-	"github.com/sourcegraph/sourcegraph/internal/db"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 )
 
@@ -20,6 +21,7 @@ var _ graphqlbackend.UserConnectionResolver = &userConnectionResolver{}
 // userConnectionResolver resolves a list of user from the roaring bitmap with pagination.
 type userConnectionResolver struct {
 	ids *roaring.Bitmap
+	db  dbutil.DB
 
 	first int32
 	after *string
@@ -55,7 +57,7 @@ func (r *userConnectionResolver) compute(ctx context.Context) ([]*types.User, *g
 			}
 		}
 
-		r.users, r.err = db.Users.List(ctx, &db.UsersListOptions{
+		r.users, r.err = database.GlobalUsers.List(ctx, &database.UsersListOptions{
 			UserIDs: userIDs,
 		})
 		if r.err != nil {
@@ -84,7 +86,7 @@ func (r *userConnectionResolver) Nodes(ctx context.Context) ([]*graphqlbackend.U
 	}
 	resolvers := make([]*graphqlbackend.UserResolver, len(users))
 	for i := range users {
-		resolvers[i] = graphqlbackend.NewUserResolver(users[i])
+		resolvers[i] = graphqlbackend.NewUserResolver(r.db, users[i])
 	}
 	return resolvers, nil
 }

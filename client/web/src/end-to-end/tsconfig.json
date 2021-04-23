@@ -1,17 +1,10 @@
 {
   "extends": "../../tsconfig.json",
-  "references": [{ "path": "../../../shared/src/testing" }, { "path": "../../../../schema" }],
   "compilerOptions": {
     "types": ["mocha", "node"],
     "module": "commonjs",
-    "plugins": [
-      {
-        "name": "ts-graphql-plugin",
-        "schema": "../../../../cmd/frontend/graphqlbackend/schema.graphql",
-        "tag": "gql",
-      },
-    ],
   },
+  "references": [{ "path": "../../../shared/src/testing" }, { "path": "../../../../schema" }],
   "include": ["**/*"],
   "exclude": [],
 }

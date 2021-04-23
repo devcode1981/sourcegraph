@@ -1,10 +1,12 @@
 import * as H from 'history'
 import React from 'react'
 import renderer from 'react-test-renderer'
+import { NEVER } from 'rxjs'
+
 import { createBarrier } from '../api/integration-test/testHelpers'
 import { NOOP_TELEMETRY_SERVICE } from '../telemetry/telemetryService'
+
 import { ActionItem } from './ActionItem'
-import { NEVER } from 'rxjs'
 
 jest.mock('mdi-react/OpenInNewIcon', () => 'OpenInNewIcon')
 
@@ -16,6 +18,7 @@ describe('ActionItem', () => {
     test('non-actionItem variant', () => {
         const component = renderer.create(
             <ActionItem
+                active={true}
                 action={{ id: 'c', command: 'c', title: 't', description: 'd', iconURL: 'u', category: 'g' }}
                 telemetryService={NOOP_TELEMETRY_SERVICE}
                 location={history.location}
@@ -29,6 +32,7 @@ describe('ActionItem', () => {
     test('actionItem variant', () => {
         const component = renderer.create(
             <ActionItem
+                active={true}
                 action={{ id: 'c', command: 'c', title: 't', description: 'd', iconURL: 'u', category: 'g' }}
                 telemetryService={NOOP_TELEMETRY_SERVICE}
                 variant="actionItem"
@@ -43,6 +47,7 @@ describe('ActionItem', () => {
     test('noop command', () => {
         const component = renderer.create(
             <ActionItem
+                active={true}
                 action={{ id: 'c', title: 't', description: 'd', iconURL: 'u', category: 'g' }}
                 telemetryService={NOOP_TELEMETRY_SERVICE}
                 location={history.location}
@@ -56,6 +61,7 @@ describe('ActionItem', () => {
     test('pressed toggle actionItem', () => {
         const component = renderer.create(
             <ActionItem
+                active={true}
                 action={{ id: 'a', command: 'c', actionItem: { pressed: true, label: 'b' } }}
                 telemetryService={NOOP_TELEMETRY_SERVICE}
                 variant="actionItem"
@@ -70,6 +76,7 @@ describe('ActionItem', () => {
     test('non-pressed actionItem', () => {
         const component = renderer.create(
             <ActionItem
+                active={true}
                 action={{ id: 'a', command: 'c', actionItem: { pressed: false, label: 'b' } }}
                 telemetryService={NOOP_TELEMETRY_SERVICE}
                 variant="actionItem"
@@ -84,6 +91,7 @@ describe('ActionItem', () => {
     test('title element', () => {
         const component = renderer.create(
             <ActionItem
+                active={true}
                 action={{ id: 'c', command: 'c', title: 't', description: 'd', iconURL: 'u', category: 'g' }}
                 telemetryService={NOOP_TELEMETRY_SERVICE}
                 variant="actionItem"
@@ -101,6 +109,7 @@ describe('ActionItem', () => {
 
         const component = renderer.create(
             <ActionItem
+                active={true}
                 action={{ id: 'c', command: 'c', title: 't', description: 'd', iconURL: 'u', category: 'g' }}
                 telemetryService={NOOP_TELEMETRY_SERVICE}
                 variant="actionItem"
@@ -130,6 +139,7 @@ describe('ActionItem', () => {
 
         const component = renderer.create(
             <ActionItem
+                active={true}
                 action={{ id: 'c', command: 'c', title: 't', description: 'd', iconURL: 'u', category: 'g' }}
                 telemetryService={NOOP_TELEMETRY_SERVICE}
                 variant="actionItem"
@@ -157,6 +167,7 @@ describe('ActionItem', () => {
     test('run command with error', async () => {
         const component = renderer.create(
             <ActionItem
+                active={true}
                 action={{ id: 'c', command: 'c', title: 't', description: 'd', iconURL: 'u', category: 'g' }}
                 telemetryService={NOOP_TELEMETRY_SERVICE}
                 variant="actionItem"
@@ -182,6 +193,7 @@ describe('ActionItem', () => {
     test('run command with error with showInlineError', async () => {
         const component = renderer.create(
             <ActionItem
+                active={true}
                 action={{ id: 'c', command: 'c', title: 't', description: 'd', iconURL: 'u', category: 'g' }}
                 telemetryService={NOOP_TELEMETRY_SERVICE}
                 variant="actionItem"
@@ -210,6 +222,7 @@ describe('ActionItem', () => {
 
             const component = renderer.create(
                 <ActionItem
+                    active={true}
                     action={{ id: 'c', command: 'open', commandArguments: ['https://example.com/bar'], title: 't' }}
                     telemetryService={NOOP_TELEMETRY_SERVICE}
                     location={history.location}
@@ -225,6 +238,7 @@ describe('ActionItem', () => {
 
             const component = renderer.create(
                 <ActionItem
+                    active={true}
                     action={{ id: 'c', command: 'open', commandArguments: ['https://other.com/foo'], title: 't' }}
                     telemetryService={NOOP_TELEMETRY_SERVICE}
                     location={history.location}
@@ -240,6 +254,7 @@ describe('ActionItem', () => {
 
             const component = renderer.create(
                 <ActionItem
+                    active={true}
                     action={{ id: 'c1', command: 'whatever', title: 'primary' }}
                     altAction={{ id: 'c2', command: 'open', commandArguments: ['https://other.com/foo'], title: 'alt' }}
                     telemetryService={NOOP_TELEMETRY_SERVICE}

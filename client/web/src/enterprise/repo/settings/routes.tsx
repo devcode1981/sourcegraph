@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { Redirect, RouteComponentProps } from 'react-router'
+
 import { RepoSettingsAreaRoute } from '../../../repo/settings/RepoSettingsArea'
 import { repoSettingsAreaRoutes } from '../../../repo/settings/routes'
 import { lazyComponent } from '../../../util/lazyComponent'
@@ -8,6 +9,7 @@ import { CodeIntelIndexPageProps } from '../../codeintel/detail/CodeIntelIndexPa
 import { CodeIntelUploadPageProps } from '../../codeintel/detail/CodeIntelUploadPage'
 import { CodeIntelIndexesPageProps } from '../../codeintel/list/CodeIntelIndexesPage'
 import { CodeIntelUploadsPageProps } from '../../codeintel/list/CodeIntelUploadsPage'
+
 import { RepoSettingsPermissionsPageProps } from './RepoSettingsPermissionsPage'
 
 const RepoSettingsPermissionsPage = lazyComponent<RepoSettingsPermissionsPageProps, 'RepoSettingsPermissionsPage'>(
@@ -43,6 +45,8 @@ export const enterpriseRepoSettingsAreaRoutes: readonly RepoSettingsAreaRoute[] 
         exact: true,
         render: props => <RepoSettingsPermissionsPage {...props} />,
     },
+
+    // Code intelligence upload routes
     {
         path: '/code-intelligence/uploads',
         exact: true,
@@ -53,21 +57,28 @@ export const enterpriseRepoSettingsAreaRoutes: readonly RepoSettingsAreaRoute[] 
         exact: true,
         render: props => <CodeIntelUploadPage {...props} />,
     },
-    {
-        path: '/code-intelligence/index-configuration',
-        exact: true,
-        render: props => <CodeIntelIndexConfigurationPage {...props} />,
-    },
+
+    // Auto indexing routes
     {
         path: '/code-intelligence/indexes',
         exact: true,
         render: props => <CodeIntelIndexesPage {...props} />,
+        condition: () => Boolean(window.context?.codeIntelAutoIndexingEnabled),
     },
     {
         path: '/code-intelligence/indexes/:id',
         exact: true,
         render: props => <CodeIntelIndexPage {...props} />,
+        condition: () => Boolean(window.context?.codeIntelAutoIndexingEnabled),
     },
+    {
+        path: '/code-intelligence/index-configuration',
+        exact: true,
+        render: props => <CodeIntelIndexConfigurationPage {...props} />,
+        condition: () => Boolean(window.context?.codeIntelAutoIndexingEnabled),
+    },
+
+    // Legacy routes
     {
         path: '/code-intelligence/lsif-uploads/:id',
         exact: true,

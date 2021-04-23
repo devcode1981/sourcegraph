@@ -1,9 +1,10 @@
 import { last, take } from 'lodash'
 
-import { FileSpec, RawRepoSpec, RevisionSpec } from '../../../../../shared/src/util/url'
+import { FileSpec, RawRepoSpec, RevisionSpec } from '@sourcegraph/shared/src/util/url'
+
+import { isExtension } from '../../context'
 import { commitIDFromPermalink } from '../../util/dom'
 import { FileInfo } from '../shared/codeHost'
-import { isExtension } from '../../context'
 
 export enum GitLabPageKind {
     File,
@@ -114,6 +115,11 @@ const getFilePathFromElement = (element: HTMLElement): string => {
     const filePath = element.dataset.originalTitle || element.dataset.title || element.title
     if (!filePath) {
         throw new Error('Unable to get file paths from code view: no file title')
+    }
+
+    // Deleted files in MRs include " deleted" after the filepath of deleted files
+    if (filePath.endsWith(' deleted')) {
+        return filePath.slice(0, -8)
     }
 
     return filePath

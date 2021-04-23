@@ -13,6 +13,7 @@ import (
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	"github.com/opentracing/opentracing-go/ext"
 	"github.com/pkg/errors"
+
 	"github.com/sourcegraph/sourcegraph/internal/api"
 	"github.com/sourcegraph/sourcegraph/internal/env"
 	"github.com/sourcegraph/sourcegraph/internal/metrics"
@@ -20,27 +21,12 @@ import (
 	"github.com/sourcegraph/sourcegraph/internal/trace/ot"
 )
 
-var repoupdaterURL = env.Get("REPO_UPDATER_URL", "http://repo-updater:3182", "repo-updater server URL")
-
 var requestMeter = metrics.NewRequestMeter("repoupdater", "Total number of requests sent to repoupdater.")
 
-// DefaultClient is the default Client. Unless overwritten, it is connected to the server specified by the
-// REPO_UPDATER_URL environment variable.
-var DefaultClient = &Client{
-	URL: repoupdaterURL,
-	HTTPClient: &http.Client{
-		// ot.Transport will propagate opentracing spans and whether or not to trace
-		Transport: &ot.Transport{
-			RoundTripper: requestMeter.Transport(&http.Transport{
-				// Default is 2, but we can send many concurrent requests
-				MaxIdleConnsPerHost: 500,
-			}, func(u *url.URL) string {
-				// break it down by API function call (ie "/repo-update-scheduler-info", "/repo-lookup", etc)
-				return u.Path
-			}),
-		},
-	},
-}
+// DefaultClient is the default Client. Unless overwritten, it is
+// connected to the server specified by the REPO_UPDATER_URL
+// environment variable.
+var DefaultClient = NewClient(env.Get("REPO_UPDATER_URL", "http://repo-updater:3182", "repo-updater server URL"))
 
 // Client is a repoupdater client.
 type Client struct {
@@ -49,6 +35,25 @@ type Client struct {
 
 	// HTTP client to use
 	HTTPClient *http.Client
+}
+
+// NewClient will initiate a new repoupdater Client with the given serverURL.
+func NewClient(serverURL string) *Client {
+	return &Client{
+		URL: serverURL,
+		HTTPClient: &http.Client{
+			// ot.Transport will propagate opentracing spans and whether or not to trace
+			Transport: &ot.Transport{
+				RoundTripper: requestMeter.Transport(&http.Transport{
+					// Default is 2, but we can send many concurrent requests
+					MaxIdleConnsPerHost: 500,
+				}, func(u *url.URL) string {
+					// break it down by API function call (ie "/repo-update-scheduler-info", "/repo-lookup", etc)
+					return u.Path
+				}),
+			},
+		},
+	}
 }
 
 // RepoUpdateSchedulerInfo returns information about the state of the repo in the update scheduler.
@@ -306,35 +311,6 @@ func (c *Client) ExcludeRepo(ctx context.Context, id api.RepoID) (*protocol.Excl
 	return &res, nil
 }
 
-// MockStatusMessages mocks (*Client).StatusMessages for tests.
-var MockStatusMessages func(context.Context) (*protocol.StatusMessagesResponse, error)
-
-// StatusMessages returns an array of status messages
-func (c *Client) StatusMessages(ctx context.Context) (*protocol.StatusMessagesResponse, error) {
-	if MockStatusMessages != nil {
-		return MockStatusMessages(ctx)
-	}
-
-	resp, err := c.httpGet(ctx, "status-messages")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	bs, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to read response body")
-	}
-
-	var res protocol.StatusMessagesResponse
-	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		return nil, errors.New(string(bs))
-	} else if err = json.Unmarshal(bs, &res); err != nil {
-		return nil, err
-	}
-	return &res, nil
-}
-
 func (c *Client) httpPost(ctx context.Context, method string, payload interface{}) (resp *http.Response, err error) {
 	reqBody, err := json.Marshal(payload)
 	if err != nil {
@@ -342,15 +318,6 @@ func (c *Client) httpPost(ctx context.Context, method string, payload interface{
 	}
 
 	req, err := http.NewRequest("POST", c.URL+"/"+method, bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, err
-	}
-
-	return c.do(ctx, req)
-}
-
-func (c *Client) httpGet(ctx context.Context, method string) (*http.Response, error) {
-	req, err := http.NewRequest("GET", c.URL+"/"+method, nil)
 	if err != nil {
 		return nil, err
 	}

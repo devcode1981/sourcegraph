@@ -1,11 +1,12 @@
-import * as GQL from '../../../shared/src/graphql/schema'
-import { SettingsCascadeOrError } from '../../../shared/src/settings/settings'
-import { isErrorLike } from '../../../shared/src/util/errors'
-import { LayoutProps } from '../Layout'
-import { parseSearchURLPatternType } from '../search'
-import { SettingsExperimentalFeatures } from '../schema/settings.schema'
+import { SearchPatternType } from '@sourcegraph/shared/src/graphql-operations'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { SettingsCascadeOrError } from '@sourcegraph/shared/src/settings/settings'
+import { isErrorLike } from '@sourcegraph/shared/src/util/errors'
+
 import { AuthenticatedUser } from '../auth'
-import { SearchPatternType } from '../../../shared/src/graphql-operations'
+import { LayoutProps } from '../Layout'
+import { SettingsExperimentalFeatures } from '../schema/settings.schema'
+import { parseSearchURLPatternType } from '../search'
 
 /** A fallback settings subject that can be constructed synchronously at initialization time. */
 export const SITE_SUBJECT_NO_ADMIN: Pick<GQL.ISettingsSubject, 'id' | 'viewerCanAdminister'> = {
@@ -44,41 +45,59 @@ export function defaultPatternTypeFromSettings(settingsCascade: SettingsCascadeO
     return
 }
 
+export function defaultCaseSensitiveFromSettings(settingsCascade: SettingsCascadeOrError): boolean {
+    // Analogous to defaultPatternTypeFromSettings, but for case sensitivity.
+    if (!parseSearchURLPatternType(window.location.search)) {
+        const defaultCaseSensitive =
+            settingsCascade.final &&
+            !isErrorLike(settingsCascade.final) &&
+            (settingsCascade.final['search.defaultCaseSensitive'] as boolean)
+        return defaultCaseSensitive || false
+    }
+    return false
+}
+
 export function experimentalFeaturesFromSettings(
     settingsCascade: SettingsCascadeOrError
 ): {
-    splitSearchModes: boolean
     copyQueryButton: boolean
     showRepogroupHomepage: boolean
     showOnboardingTour: boolean
     showEnterpriseHomePanels: boolean
     showMultilineSearchConsole: boolean
+    showSearchContext: boolean
+    showSearchContextManagement: boolean
     showQueryBuilder: boolean
     enableSmartQuery: boolean
+    enableCodeMonitoring: boolean
 } {
     const experimentalFeatures: SettingsExperimentalFeatures =
         (settingsCascade.final && !isErrorLike(settingsCascade.final) && settingsCascade.final.experimentalFeatures) ||
         {}
 
     const {
-        splitSearchModes = false,
         copyQueryButton = false,
         showRepogroupHomepage = false,
         showOnboardingTour = true, // Default to true if not set
         showEnterpriseHomePanels = true, // Default to true if not set
+        showSearchContext = false,
+        showSearchContextManagement = false,
         showMultilineSearchConsole = false,
         showQueryBuilder = false,
         enableSmartQuery = true,
+        codeMonitoring = true, // Default to true if not set
     } = experimentalFeatures
 
     return {
-        splitSearchModes,
         copyQueryButton,
         showRepogroupHomepage,
         showOnboardingTour,
+        showSearchContext,
+        showSearchContextManagement,
         showEnterpriseHomePanels,
         showMultilineSearchConsole,
         showQueryBuilder,
         enableSmartQuery,
+        enableCodeMonitoring: codeMonitoring,
     }
 }

@@ -1,21 +1,24 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import * as H from 'history'
-import { ThemeProps } from '../../../shared/src/theme'
-import { PageTitle } from '../components/PageTitle'
 import * as Monaco from 'monaco-editor'
-import { MonacoEditor } from '../components/MonacoEditor'
-import * as GQL from '../../../shared/src/graphql/schema'
-import { SearchResultsList, SearchResultsListProps } from './results/SearchResultsList'
-import { ErrorLike } from '../../../shared/src/util/errors'
-import { addSourcegraphSearchCodeIntelligence } from './input/MonacoQueryInput'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { BehaviorSubject, concat, NEVER, of } from 'rxjs'
-import { useObservable } from '../../../shared/src/util/useObservable'
-import { search, shouldDisplayPerformanceWarning } from './backend'
-import { ExtensionsControllerProps } from '../../../shared/src/extensions/controller'
-import { Omit } from 'utility-types'
+
 import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
-import { parseSearchURLQuery, parseSearchURLPatternType } from '.'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { ErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
+
+import { MonacoEditor } from '../components/MonacoEditor'
+import { PageTitle } from '../components/PageTitle'
 import { SearchPatternType } from '../graphql-operations'
+
+import { fetchSuggestions, search, shouldDisplayPerformanceWarning } from './backend'
+import { addSourcegraphSearchCodeIntelligence } from './input/MonacoQueryInput'
+import { SearchResultsList, SearchResultsListProps } from './results/SearchResultsList'
+
+import { parseSearchURLQuery, parseSearchURLPatternType } from '.'
 
 interface SearchConsolePageProps
     extends ThemeProps,
@@ -29,8 +32,9 @@ interface SearchConsolePageProps
             | 'onSaveQueryClick'
             | 'shouldDisplayPerformanceWarning'
         >,
-        ExtensionsControllerProps<'executeCommand' | 'services' | 'extHostAPI'> {
+        ExtensionsControllerProps<'executeCommand' | 'extHostAPI'> {
     globbing: boolean
+    isMacPlatform: boolean
     history: H.History
     location: H.Location
 }
@@ -93,7 +97,7 @@ export const SearchConsolePage: React.FunctionComponent<SearchConsolePageProps> 
         if (!monacoInstance) {
             return
         }
-        const subscription = addSourcegraphSearchCodeIntelligence(monacoInstance, searchQuery, {
+        const subscription = addSourcegraphSearchCodeIntelligence(monacoInstance, searchQuery, fetchSuggestions, {
             patternType,
             globbing,
             enableSmartQuery: true,
@@ -142,8 +146,7 @@ export const SearchConsolePage: React.FunctionComponent<SearchConsolePageProps> 
                     <div className="mb-1 d-flex align-items-center justify-content-between">
                         <div />
                         <button className="btn btn-lg btn-primary" type="button" onClick={triggerSearch}>
-                            Search &nbsp; {window.navigator.platform.includes('Mac') ? <kbd>⌘</kbd> : <kbd>Ctrl</kbd>}+
-                            <kbd>⏎</kbd>
+                            Search &nbsp; {props.isMacPlatform ? <kbd>⌘</kbd> : <kbd>Ctrl</kbd>}+<kbd>⏎</kbd>
                         </button>
                     </div>
                     <MonacoEditor

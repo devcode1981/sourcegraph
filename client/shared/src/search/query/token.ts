@@ -19,7 +19,16 @@ export interface BaseToken {
 /**
  * All recognized tokens.
  */
-export type Token = Whitespace | OpeningParen | ClosingParen | Keyword | Comment | Literal | Pattern | Filter | Quoted
+export type Token =
+    | Whitespace
+    | OpeningParen
+    | ClosingParen
+    | Keyword
+    | Comment
+    | Literal
+    | Pattern
+    | Filter
+    | Separator
 
 /**
  * A label associated with a pattern token. We don't use SearchPatternType because
@@ -42,13 +51,14 @@ export interface Pattern extends BaseToken {
 }
 
 /**
- * Represents a literal in a search query.
+ * Represents a value in a search query. E.g., either a quoted or unquoted pattern or field value.
  *
  * Example: `Conn`.
  */
 export interface Literal extends BaseToken {
     type: 'literal'
     value: string
+    quoted: boolean
 }
 
 /**
@@ -59,8 +69,15 @@ export interface Literal extends BaseToken {
 export interface Filter extends BaseToken {
     type: 'filter'
     field: Literal
-    value: Quoted | Literal | undefined
+    value: Literal | undefined
     negated: boolean
+}
+
+/**
+ * A filter separator, i.e., the `:` in `field:value`.
+ */
+export interface Separator extends BaseToken {
+    type: 'separator'
 }
 
 export enum KeywordKind {
@@ -78,16 +95,6 @@ export interface Keyword extends BaseToken {
     type: 'keyword'
     value: string
     kind: KeywordKind
-}
-
-/**
- * Represents a quoted string in a search query.
- *
- * Example: "Conn".
- */
-export interface Quoted extends BaseToken {
-    type: 'quoted'
-    quotedValue: string
 }
 
 /**
@@ -111,3 +118,10 @@ export interface OpeningParen extends BaseToken {
 export interface ClosingParen extends BaseToken {
     type: 'closingParen'
 }
+
+export const createLiteral = (value: string, range: CharacterRange, quoted = false): Literal => ({
+    type: 'literal',
+    value,
+    range,
+    quoted,
+})

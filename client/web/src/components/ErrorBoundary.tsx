@@ -3,7 +3,9 @@ import * as H from 'history'
 import ErrorIcon from 'mdi-react/ErrorIcon'
 import ReloadIcon from 'mdi-react/ReloadIcon'
 import React from 'react'
-import { asError, isErrorLike } from '../../../shared/src/util/errors'
+
+import { asError, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+
 import { HeroPage } from './HeroPage'
 
 interface Props {
@@ -12,6 +14,21 @@ interface Props {
      * react-router component).
      */
     location: H.Location | null
+
+    /**
+     * Extra context to aid with debugging
+     */
+    extraContext?: JSX.Element
+
+    /**
+     * Custom render logic in place of <HeroPage>
+     */
+    render?: (error: Error) => JSX.Element
+
+    /**
+     * Classname to pass to <HeroPage>
+     */
+    className?: string
 }
 
 interface State {
@@ -72,10 +89,15 @@ export class ErrorBoundary extends React.PureComponent<Props, State> {
                 )
             }
 
+            if (this.props.render) {
+                return this.props.render(this.state.error)
+            }
+
             return (
                 <HeroPage
                     icon={ErrorIcon}
                     title="Error"
+                    className={this.props.className}
                     subtitle={
                         <div className="container">
                             <p>
@@ -85,6 +107,7 @@ export class ErrorBoundary extends React.PureComponent<Props, State> {
                             <p>
                                 <code className="text-wrap">{this.state.error.message}</code>
                             </p>
+                            {this.props.extraContext}
                         </div>
                     }
                 />

@@ -1,21 +1,24 @@
 import classnames from 'classnames'
+import * as H from 'history'
+import { isEqual } from 'lodash'
 import React, { useCallback, useMemo, useState } from 'react'
 import { Observable } from 'rxjs'
-import { asError, isErrorLike } from '../../../../../shared/src/util/errors'
+import { mergeMap, startWith, catchError, tap, filter } from 'rxjs/operators'
+
+import { Form } from '@sourcegraph/branded/src/components/Form'
+import { Toggle } from '@sourcegraph/branded/src/components/Toggle'
+import { asError, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { useEventObservable } from '@sourcegraph/shared/src/util/useObservable'
+
 import { AuthenticatedUser } from '../../../auth'
-import * as H from 'history'
-import { Toggle } from '../../../../../branded/src/components/Toggle'
+import { CodeMonitorFields } from '../../../graphql-operations'
+import { deleteCodeMonitor as _deleteCodeMonitor } from '../backend'
+
+import { DeleteMonitorModal } from './DeleteMonitorModal'
 import { FormActionArea } from './FormActionArea'
 import { FormTriggerArea } from './FormTriggerArea'
-import { mergeMap, startWith, catchError, tap, filter } from 'rxjs/operators'
-import { Form } from '../../../../../branded/src/components/Form'
-import { useEventObservable } from '../../../../../shared/src/util/useObservable'
-import { CodeMonitorFields } from '../../../graphql-operations'
-import { isEqual } from 'lodash'
-import { CodeMonitoringProps } from '..'
-import { DeleteMonitorModal } from './DeleteMonitorModal'
 
-export interface CodeMonitorFormProps extends Partial<Pick<CodeMonitoringProps, 'deleteCodeMonitor'>> {
+export interface CodeMonitorFormProps {
     history: H.History
     location: H.Location
     authenticatedUser: AuthenticatedUser
@@ -30,6 +33,10 @@ export interface CodeMonitorFormProps extends Partial<Pick<CodeMonitoringProps, 
     codeMonitor?: CodeMonitorFields
     /* Whether to show the delete button */
     showDeleteButton?: boolean
+    /* Optional trigger query to pre-populate the trigger form */
+    triggerQuery?: string
+
+    deleteCodeMonitor?: typeof _deleteCodeMonitor
 }
 
 interface FormCompletionSteps {
@@ -44,7 +51,8 @@ export const CodeMonitorForm: React.FunctionComponent<CodeMonitorFormProps> = ({
     submitButtonLabel,
     codeMonitor,
     showDeleteButton,
-    deleteCodeMonitor,
+    deleteCodeMonitor = _deleteCodeMonitor,
+    triggerQuery,
 }) => {
     const LOADING = 'loading' as const
 
@@ -53,7 +61,7 @@ export const CodeMonitorForm: React.FunctionComponent<CodeMonitorFormProps> = ({
             id: '',
             description: '',
             enabled: true,
-            trigger: { id: '', query: '' },
+            trigger: { id: '', query: triggerQuery ?? '' },
             actions: {
                 nodes: [],
             },
@@ -137,7 +145,7 @@ export const CodeMonitorForm: React.FunctionComponent<CodeMonitorFormProps> = ({
     return (
         <>
             <Form className="my-4 pb-5 test-monitor-form" onSubmit={requestOnSubmit}>
-                <div className="flex mb-4">
+                <div className="d-flex flex-column mb-4">
                     Name
                     <div>
                         <input
@@ -154,7 +162,7 @@ export const CodeMonitorForm: React.FunctionComponent<CodeMonitorFormProps> = ({
                     </div>
                     <small className="text-muted">
                         Give it a short, descriptive name to reference events on Sourcegraph and in notifications. Do
-                        not include:{' '}
+                        not include{' '}
                         <a
                             href="https://docs.sourcegraph.com/code_monitoring/explanations/best_practices#do-not-include-confidential-information-in-monitor-names"
                             target="_blank"
@@ -178,17 +186,18 @@ export const CodeMonitorForm: React.FunctionComponent<CodeMonitorFormProps> = ({
                     </small>
                 </div>
                 <hr className="code-monitor-form__horizontal-rule" />
-                <div className="create-monitor-page__triggers mb-4">
+                <div className="code-monitor-form__triggers mb-4">
                     <FormTriggerArea
                         query={currentCodeMonitorState.trigger.query}
                         onQueryChange={onQueryChange}
                         triggerCompleted={formCompletion.triggerCompleted}
                         setTriggerCompleted={setTriggerCompleted}
+                        startExpanded={!!triggerQuery}
                     />
                 </div>
                 <div
                     className={classnames({
-                        'create-monitor-page__actions--disabled': !formCompletion.triggerCompleted,
+                        'code-monitor-form__actions--disabled': !formCompletion.triggerCompleted,
                     })}
                 >
                     <FormActionArea
@@ -198,6 +207,7 @@ export const CodeMonitorForm: React.FunctionComponent<CodeMonitorFormProps> = ({
                         authenticatedUser={authenticatedUser}
                         disabled={!formCompletion.triggerCompleted}
                         onActionsChange={onActionsChange}
+                        description={currentCodeMonitorState.description}
                     />
                 </div>
                 <hr className="code-monitor-form__horizontal-rule" />
@@ -209,11 +219,16 @@ export const CodeMonitorForm: React.FunctionComponent<CodeMonitorFormProps> = ({
                                 value={currentCodeMonitorState.enabled}
                                 onToggle={onEnabledChange}
                                 className="mr-2"
+                                aria-describedby="code-monitor-form__toggle-description"
                             />{' '}
                         </div>
-                        <div className="flex-column">
-                            <div>Active</div>
-                            <div className="text-muted">We will watch for the trigger and run actions in response</div>
+                        <div className="flex-column" id="code-monitor-form__toggle-description">
+                            <div>{currentCodeMonitorState.enabled ? 'Active' : 'Inactive'}</div>
+                            <div className="text-muted">
+                                {currentCodeMonitorState.enabled
+                                    ? 'Code monitor will watch for the trigger and run actions in response'
+                                    : 'Code monitor will not respond to trigger events'}
+                            </div>
                         </div>
                     </div>
                     <div className="d-flex justify-content-between my-4">
@@ -255,7 +270,7 @@ export const CodeMonitorForm: React.FunctionComponent<CodeMonitorFormProps> = ({
                     )}
                 </div>
             </Form>
-            {showDeleteButton && deleteCodeMonitor && (
+            {showDeleteButton && (
                 <DeleteMonitorModal
                     isOpen={showDeleteModal}
                     deleteCodeMonitor={deleteCodeMonitor}

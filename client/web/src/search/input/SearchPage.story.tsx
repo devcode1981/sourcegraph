@@ -1,15 +1,19 @@
-import React from 'react'
-import { _fetchRecentFileViews, _fetchRecentSearches, _fetchSavedSearches, authUser } from '../panels/utils'
-import { createMemoryHistory } from 'history'
-import { NOOP_TELEMETRY_SERVICE } from '../../../../shared/src/telemetry/telemetryService'
-import { parseISO } from 'date-fns'
-import { SearchPage, SearchPageProps } from './SearchPage'
-import { SearchPatternType } from '../../graphql-operations'
-import { Services } from '../../../../shared/src/api/client/services'
 import { storiesOf } from '@storybook/react'
-import { ThemePreference } from '../../theme'
-import { ThemeProps } from '../../../../shared/src/theme'
+import { parseISO } from 'date-fns'
+import { createMemoryHistory } from 'history'
+import React from 'react'
+
+import { NOOP_TELEMETRY_SERVICE } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { extensionsController } from '@sourcegraph/shared/src/util/searchTestHelpers'
+
 import { WebStory } from '../../components/WebStory'
+import { SearchPatternType } from '../../graphql-operations'
+import { mockFetchAutoDefinedSearchContexts, mockFetchSearchContexts } from '../../searchContexts/testHelpers'
+import { ThemePreference } from '../../theme'
+import { _fetchRecentFileViews, _fetchRecentSearches, _fetchSavedSearches, authUser } from '../panels/utils'
+
+import { SearchPage, SearchPageProps } from './SearchPage'
 
 const history = createMemoryHistory()
 const defaultProps = (props: ThemeProps): SearchPageProps => ({
@@ -20,30 +24,29 @@ const defaultProps = (props: ThemeProps): SearchPageProps => ({
     },
     location: history.location,
     history,
-    extensionsController: {
-        services: {} as Services,
-    } as any,
+    extensionsController,
     telemetryService: NOOP_TELEMETRY_SERVICE,
     themePreference: ThemePreference.Light,
     onThemePreferenceChange: () => undefined,
     authenticatedUser: authUser,
-    setVersionContext: () => undefined,
+    setVersionContext: () => Promise.resolve(undefined),
     availableVersionContexts: [],
     globbing: false,
     enableSmartQuery: false,
+    parsedSearchQuery: 'r:golang/oauth2 test f:travis',
     patternType: SearchPatternType.literal,
     setPatternType: () => undefined,
     caseSensitive: false,
     setCaseSensitivity: () => undefined,
     platformContext: {} as any,
     keyboardShortcuts: [],
-    filtersInQuery: {} as any,
-    onFiltersInQueryChange: () => undefined,
-    splitSearchModes: false,
-    interactiveSearchMode: false,
-    toggleSearchMode: () => undefined,
     copyQueryButton: false,
     versionContext: undefined,
+    showSearchContext: false,
+    showSearchContextManagement: false,
+    selectedSearchContextSpec: '',
+    setSelectedSearchContextSpec: () => {},
+    defaultSearchContextSpec: '',
     showRepogroupHomepage: false,
     showEnterpriseHomePanels: false,
     showOnboardingTour: false,
@@ -53,6 +56,8 @@ const defaultProps = (props: ThemeProps): SearchPageProps => ({
     fetchRecentSearches: _fetchRecentSearches,
     fetchRecentFileViews: _fetchRecentFileViews,
     now: () => parseISO('2020-09-16T23:15:01Z'),
+    fetchAutoDefinedSearchContexts: mockFetchAutoDefinedSearchContexts(),
+    fetchSearchContexts: mockFetchSearchContexts,
 })
 
 const { add } = storiesOf('web/search/input/SearchPage', module).addParameters({

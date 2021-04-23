@@ -1,8 +1,11 @@
-import React from 'react'
-import { TextDocumentDecoration, ThemableDecorationStyle } from 'sourcegraph'
-import { Position, Range } from '@sourcegraph/extension-api-classes'
-import { LineDecorator, LineDecoratorProps } from './LineDecorator'
 import { mount } from 'enzyme'
+import React from 'react'
+import { ReplaySubject } from 'rxjs'
+import { TextDocumentDecoration, ThemableDecorationStyle } from 'sourcegraph'
+
+import { Position, Range } from '@sourcegraph/extension-api-classes'
+
+import { LineDecorator, LineDecoratorProps } from './LineDecorator'
 
 describe('LineDecorator', () => {
     function createCodeElement() {
@@ -21,12 +24,15 @@ describe('LineDecorator', () => {
     ): LineDecoratorProps {
         const codeViewElement = document.createElement('div')
 
+        const codeViewElements = new ReplaySubject<HTMLElement | null>()
+        codeViewElements.next(codeViewElement)
+
         return {
             line,
             decorations,
             portalID: `line-decoration-attachment-${line}`,
             isLightTheme: false,
-            codeViewReference: { current: codeViewElement },
+            codeViewElements,
             getCodeElementFromLineNumber: (codeView: HTMLElement, lineNumber: number): HTMLTableCellElement | null => {
                 if (codeView === codeViewElement && lineNumber === line) {
                     return codeElement

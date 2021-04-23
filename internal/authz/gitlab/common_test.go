@@ -2,7 +2,6 @@ package gitlab
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/url"
 	"sort"
@@ -13,11 +12,9 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/auth/providers"
-	"github.com/sourcegraph/sourcegraph/internal/api"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc/auth"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc/gitlab"
-	"github.com/sourcegraph/sourcegraph/internal/types"
 	"github.com/sourcegraph/sourcegraph/schema"
 )
 
@@ -138,7 +135,7 @@ func (m *mockGitLab) GetProject(c *gitlab.Client, ctx context.Context, op gitlab
 
 	proj, ok := m.projs[op.ID]
 	if !ok {
-		return nil, gitlab.ErrNotFound
+		return nil, gitlab.ErrProjectNotFound
 	}
 	if proj.Visibility == gitlab.Public {
 		return proj, nil
@@ -154,7 +151,7 @@ func (m *mockGitLab) GetProject(c *gitlab.Client, ctx context.Context, op gitlab
 		}
 	}
 
-	return nil, gitlab.ErrNotFound
+	return nil, gitlab.ErrProjectNotFound
 }
 
 func (m *mockGitLab) ListProjects(c *gitlab.Client, ctx context.Context, urlStr string) (projs []*gitlab.Project, nextPageURL *string, err error) {
@@ -228,7 +225,7 @@ func (m *mockGitLab) ListTree(c *gitlab.Client, ctx context.Context, op gitlab.L
 
 	proj, ok := m.projs[op.ProjID]
 	if !ok {
-		return nil, gitlab.ErrNotFound
+		return nil, gitlab.ErrProjectNotFound
 	}
 	if proj.Visibility == gitlab.Public {
 		return ret, nil
@@ -244,7 +241,7 @@ func (m *mockGitLab) ListTree(c *gitlab.Client, ctx context.Context, op gitlab.L
 		}
 	}
 
-	return nil, gitlab.ErrNotFound
+	return nil, gitlab.ErrProjectNotFound
 }
 
 // isClientAuthenticated returns true if the client is authenticated. User is authenticated if OAuth
@@ -345,21 +342,6 @@ func (m *mockGitLab) ListUsers(c *gitlab.Client, ctx context.Context, urlStr str
 	return pagedUsers, nextPageURL, nil
 }
 
-type mockCache map[string]string
-
-func (m mockCache) Get(key string) ([]byte, bool) {
-	v, ok := m[key]
-	return []byte(v), ok
-}
-
-func (m mockCache) Set(key string, b []byte) {
-	m[key] = string(b)
-}
-
-func (m mockCache) Delete(key string) {
-	delete(m, key)
-}
-
 type mockAuthnProvider struct {
 	configID  providers.ConfigID
 	serviceID string
@@ -416,31 +398,12 @@ func acct(t *testing.T, userID int32, serviceType, serviceID, accountID, oauthTo
 	}
 }
 
-func repo(uri, serviceType, serviceID, id string) *types.Repo {
-	return &types.Repo{
-		Name: api.RepoName(uri),
-		ExternalRepo: api.ExternalRepoSpec{
-			ID:          id,
-			ServiceType: serviceType,
-			ServiceID:   serviceID,
-		},
-	}
-}
-
 func mustURL(t *testing.T, u string) *url.URL {
 	parsed, err := url.Parse(u)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return parsed
-}
-
-func asJSON(t *testing.T, v interface{}) string {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(b)
 }
 
 func getIntOrDefault(str string, def int) (int, error) {

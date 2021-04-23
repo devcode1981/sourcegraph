@@ -4,99 +4,121 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+
+	"github.com/sourcegraph/sourcegraph/enterprise/lib/codeintel/semantic"
 )
 
 func TestDocumentData(t *testing.T) {
-	expected := DocumentData{
-		Ranges: map[ID]RangeData{
-			ID("7864"): {
+	expected := semantic.DocumentData{
+		Ranges: map[semantic.ID]semantic.RangeData{
+			semantic.ID("7864"): {
 				StartLine:          541,
 				StartCharacter:     10,
 				EndLine:            541,
 				EndCharacter:       12,
-				DefinitionResultID: ID("1266"),
-				ReferenceResultID:  ID("15871"),
-				HoverResultID:      ID("1269"),
+				DefinitionResultID: semantic.ID("1266"),
+				ReferenceResultID:  semantic.ID("15871"),
+				HoverResultID:      semantic.ID("1269"),
 				MonikerIDs:         nil,
 			},
-			ID("8265"): {
+			semantic.ID("8265"): {
 				StartLine:          266,
 				StartCharacter:     10,
 				EndLine:            266,
 				EndCharacter:       16,
-				DefinitionResultID: ID("311"),
-				ReferenceResultID:  ID("15500"),
-				HoverResultID:      ID("317"),
-				MonikerIDs:         []ID{ID("314")},
+				DefinitionResultID: semantic.ID("311"),
+				ReferenceResultID:  semantic.ID("15500"),
+				HoverResultID:      semantic.ID("317"),
+				MonikerIDs:         []semantic.ID{semantic.ID("314")},
 			},
 		},
-		HoverResults: map[ID]string{
-			ID("1269"): "```go\nvar id string\n```",
-			ID("317"):  "```go\ntype Vertex struct\n```\n\n---\n\nVertex contains information of a vertex in the graph.\n\n---\n\n```go\nstruct {\n    Element\n    Label VertexLabel \"json:\\\"label\\\"\"\n}\n```",
+		HoverResults: map[semantic.ID]string{
+			semantic.ID("1269"): "```go\nvar id string\n```",
+			semantic.ID("317"):  "```go\ntype Vertex struct\n```\n\n---\n\nVertex contains information of a vertex in the graph.\n\n---\n\n```go\nstruct {\n    Element\n    Label VertexLabel \"json:\\\"label\\\"\"\n}\n```",
 		},
-		Monikers: map[ID]MonikerData{
-			ID("314"): {
+		Monikers: map[semantic.ID]semantic.MonikerData{
+			semantic.ID("314"): {
 				Kind:                 "export",
 				Scheme:               "gomod",
 				Identifier:           "github.com/sourcegraph/lsif-go/protocol:Vertex",
-				PackageInformationID: ID("213"),
+				PackageInformationID: semantic.ID("213"),
 			},
-			ID("2494"): {
+			semantic.ID("2494"): {
 				Kind:                 "export",
 				Scheme:               "gomod",
 				Identifier:           "github.com/sourcegraph/lsif-go/protocol:VertexLabel",
-				PackageInformationID: ID("213"),
+				PackageInformationID: semantic.ID("213"),
 			},
 		},
-		PackageInformation: map[ID]PackageInformationData{
-			ID("213"): {
+		PackageInformation: map[semantic.ID]semantic.PackageInformationData{
+			semantic.ID("213"): {
 				Name:    "github.com/sourcegraph/lsif-go",
 				Version: "v0.0.0-ad3507cbeb18",
 			},
 		},
 	}
 
-	serializer := newSerializer()
+	t.Run("current", func(t *testing.T) {
+		serializer := NewSerializer()
 
-	recompressed, err := serializer.MarshalDocumentData(expected)
-	if err != nil {
-		t.Fatalf("unexpected error marshalling document data: %s", err)
-	}
+		recompressed, err := serializer.MarshalDocumentData(expected)
+		if err != nil {
+			t.Fatalf("unexpected error marshalling document data: %s", err)
+		}
 
-	roundtripActual, err := serializer.UnmarshalDocumentData(recompressed)
-	if err != nil {
-		t.Fatalf("unexpected error unmarshalling document data: %s", err)
-	}
+		roundtripActual, err := serializer.UnmarshalDocumentData(recompressed)
+		if err != nil {
+			t.Fatalf("unexpected error unmarshalling document data: %s", err)
+		}
 
-	if diff := cmp.Diff(expected, roundtripActual); diff != "" {
-		t.Errorf("unexpected document data (-want +got):\n%s", diff)
-	}
+		if diff := cmp.Diff(expected, roundtripActual); diff != "" {
+			t.Errorf("unexpected document data (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("legacy", func(t *testing.T) {
+		serializer := NewSerializer()
+
+		recompressed, err := serializer.MarshalLegacyDocumentData(expected)
+		if err != nil {
+			t.Fatalf("unexpected error marshalling document data: %s", err)
+		}
+
+		roundtripActual, err := serializer.UnmarshalLegacyDocumentData(recompressed)
+		if err != nil {
+			t.Fatalf("unexpected error unmarshalling document data: %s", err)
+		}
+
+		if diff := cmp.Diff(expected, roundtripActual); diff != "" {
+			t.Errorf("unexpected document data (-want +got):\n%s", diff)
+		}
+	})
 }
 
 func TestResultChunkData(t *testing.T) {
-	expected := ResultChunkData{
-		DocumentPaths: map[ID]string{
-			ID("4"):   "internal/gomod/module.go",
-			ID("302"): "protocol/protocol.go",
-			ID("305"): "protocol/writer.go",
+	expected := semantic.ResultChunkData{
+		DocumentPaths: map[semantic.ID]string{
+			semantic.ID("4"):   "internal/gomod/module.go",
+			semantic.ID("302"): "protocol/protocol.go",
+			semantic.ID("305"): "protocol/writer.go",
 		},
-		DocumentIDRangeIDs: map[ID][]DocumentIDRangeID{
-			ID("34"): {
-				{DocumentID: ID("4"), RangeID: ID("31")},
+		DocumentIDRangeIDs: map[semantic.ID][]semantic.DocumentIDRangeID{
+			semantic.ID("34"): {
+				{DocumentID: semantic.ID("4"), RangeID: semantic.ID("31")},
 			},
-			ID("14040"): {
-				{DocumentID: ID("3978"), RangeID: ID("4544")},
+			semantic.ID("14040"): {
+				{DocumentID: semantic.ID("3978"), RangeID: semantic.ID("4544")},
 			},
-			ID("14051"): {
-				{DocumentID: ID("3978"), RangeID: ID("4568")},
-				{DocumentID: ID("3978"), RangeID: ID("9224")},
-				{DocumentID: ID("3978"), RangeID: ID("9935")},
-				{DocumentID: ID("3978"), RangeID: ID("9996")},
+			semantic.ID("14051"): {
+				{DocumentID: semantic.ID("3978"), RangeID: semantic.ID("4568")},
+				{DocumentID: semantic.ID("3978"), RangeID: semantic.ID("9224")},
+				{DocumentID: semantic.ID("3978"), RangeID: semantic.ID("9935")},
+				{DocumentID: semantic.ID("3978"), RangeID: semantic.ID("9996")},
 			},
 		},
 	}
 
-	serializer := newSerializer()
+	serializer := NewSerializer()
 
 	recompressed, err := serializer.MarshalResultChunkData(expected)
 	if err != nil {
@@ -114,7 +136,7 @@ func TestResultChunkData(t *testing.T) {
 }
 
 func TestLocations(t *testing.T) {
-	expected := []LocationData{
+	expected := []semantic.LocationData{
 		{
 			URI:            "internal/index/indexer.go",
 			StartLine:      36,
@@ -187,7 +209,7 @@ func TestLocations(t *testing.T) {
 		},
 	}
 
-	serializer := newSerializer()
+	serializer := NewSerializer()
 
 	recompressed, err := serializer.MarshalLocations(expected)
 	if err != nil {

@@ -1,6 +1,7 @@
+import * as sourcegraph from 'sourcegraph'
+
 import { Position, Range } from '@sourcegraph/extension-api-classes'
 import * as clientType from '@sourcegraph/extension-api-types'
-import * as sourcegraph from 'sourcegraph'
 
 /**
  * Firefox does not like URLs being transmitted, so convert them to strings.
@@ -33,7 +34,7 @@ export function fromLocation(
     return {
         uri: location.uri.href,
         range: fromRange(location.range),
-        badge: location.badge,
+        aggregableBadges: location.aggregableBadges,
     }
 }
 
@@ -46,8 +47,8 @@ export function fromHover(hover: sourcegraph.Badged<sourcegraph.Hover>): sourceg
     return {
         contents: hover.contents,
         range: fromRange(hover.range),
-        badge: hover.badge,
         alerts: hover.alerts,
+        aggregableBadges: hover.aggregableBadges,
     }
 }
 

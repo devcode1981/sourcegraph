@@ -15,11 +15,12 @@ import (
 	"testing"
 
 	"github.com/sourcegraph/sourcegraph/internal/actor"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbtesting"
 
 	"github.com/graph-gophers/graphql-go/gqltesting"
 	"github.com/inconshreveable/log15"
 
-	"github.com/sourcegraph/sourcegraph/internal/db"
+	"github.com/sourcegraph/sourcegraph/internal/database"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc"
 	"github.com/sourcegraph/sourcegraph/internal/httpcli"
 	"github.com/sourcegraph/sourcegraph/internal/types"
@@ -47,7 +48,7 @@ func BenchmarkPrometheusFieldName(b *testing.B) {
 
 func TestRepository(t *testing.T) {
 	resetMocks()
-	db.Mocks.Repos.MockGetByName(t, "github.com/gorilla/mux", 2)
+	database.Mocks.Repos.MockGetByName(t, "github.com/gorilla/mux", 2)
 	gqltesting.RunTests(t, []*gqltesting.Test{
 		{
 			Schema: mustParseGraphQLSchema(t),
@@ -70,21 +71,24 @@ func TestRepository(t *testing.T) {
 }
 
 func TestResolverTo(t *testing.T) {
+	db := new(dbtesting.MockDB)
 	// This test exists purely to remove some non determinism in our tests
 	// run. The To* resolvers are stored in a map in our graphql
 	// implementation => the order we call them is non deterministic =>
 	// codecov coverage reports are noisy.
 	resolvers := []interface{}{
-		&FileMatchResolver{},
-		&GitTreeEntryResolver{},
+		&FileMatchResolver{db: db},
+		&GitTreeEntryResolver{db: db},
 		&NamespaceResolver{},
 		&NodeResolver{},
-		&RepositoryResolver{},
+		&RepositoryResolver{db: db},
 		&CommitSearchResultResolver{},
 		&gitRevSpec{},
-		&searchSuggestionResolver{},
+		&repositorySuggestionResolver{},
+		&symbolSuggestionResolver{},
+		&languageSuggestionResolver{},
 		&settingsSubject{},
-		&statusMessageResolver{},
+		&statusMessageResolver{db: db},
 		&versionContextResolver{},
 	}
 	for _, r := range resolvers {
@@ -108,7 +112,10 @@ func TestMain(m *testing.M) {
 
 func TestAffiliatedRepositories(t *testing.T) {
 	resetMocks()
-	db.Mocks.ExternalServices.List = func(opt db.ExternalServicesListOptions) ([]*types.ExternalService, error) {
+	database.Mocks.Users.Tags = func(ctx context.Context, userID int32) (map[string]bool, error) {
+		return map[string]bool{}, nil
+	}
+	database.Mocks.ExternalServices.List = func(opt database.ExternalServicesListOptions) ([]*types.ExternalService, error) {
 		return []*types.ExternalService{
 			{
 				ID:          1,
@@ -126,7 +133,7 @@ func TestAffiliatedRepositories(t *testing.T) {
 			},
 		}, nil
 	}
-	db.Mocks.ExternalServices.GetByID = func(id int64) (*types.ExternalService, error) {
+	database.Mocks.ExternalServices.GetByID = func(id int64) (*types.ExternalService, error) {
 		switch id {
 		case 1:
 			return &types.ExternalService{
@@ -143,11 +150,14 @@ func TestAffiliatedRepositories(t *testing.T) {
 		}
 		return nil, nil
 	}
-	db.Mocks.Users.GetByID = func(ctx context.Context, userID int32) (*types.User, error) {
+	database.Mocks.Users.GetByID = func(ctx context.Context, userID int32) (*types.User, error) {
 		return &types.User{
 			ID:        userID,
 			SiteAdmin: userID == 1,
 		}, nil
+	}
+	database.Mocks.Users.GetByCurrentAuthUser = func(ctx context.Context) (*types.User, error) {
+		return &types.User{ID: 1, SiteAdmin: true}, nil
 	}
 	cf = httpcli.NewFactory(
 		nil,

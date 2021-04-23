@@ -1,20 +1,22 @@
 import * as React from 'react'
 import { Redirect, RouteComponentProps } from 'react-router'
-import { LayoutProps } from './Layout'
-import { parseSearchURLQuery } from './search'
-import { lazyComponent } from './util/lazyComponent'
-import { isErrorLike } from '../../shared/src/util/errors'
-import { RepogroupPage } from './repogroups/RepogroupPage'
-import { python2To3Metadata } from './repogroups/Python2To3'
-import { kubernetes } from './repogroups/Kubernetes'
-import { golang } from './repogroups/Golang'
-import { reactHooks } from './repogroups/ReactHooks'
-import { android } from './repogroups/Android'
-import { stanford } from './repogroups/Stanford'
+
+import { isErrorLike } from '@sourcegraph/shared/src/util/errors'
+
 import { BreadcrumbsProps, BreadcrumbSetters } from './components/Breadcrumbs'
-import { cncf } from './repogroups/cncf'
+import { LayoutProps } from './Layout'
 import { ExtensionAlertProps } from './repo/RepoContainer'
+import { android } from './repogroups/Android'
+import { cncf } from './repogroups/cncf'
+import { golang } from './repogroups/Golang'
+import { kubernetes } from './repogroups/Kubernetes'
+import { python2To3Metadata } from './repogroups/Python2To3'
+import { reactHooks } from './repogroups/ReactHooks'
+import { RepogroupPage } from './repogroups/RepogroupPage'
+import { stanford } from './repogroups/Stanford'
 import { StreamingSearchResults } from './search/results/streaming/StreamingSearchResults'
+import { isMacPlatform, UserRepositoriesUpdateProps } from './util'
+import { lazyComponent } from './util/lazyComponent'
 
 const SearchPage = lazyComponent(() => import('./search/input/SearchPage'), 'SearchPage')
 const SearchResults = lazyComponent(() => import('./search/results/SearchResults'), 'SearchResults')
@@ -30,7 +32,10 @@ interface LayoutRouteComponentProps<RouteParameters extends { [K in keyof RouteP
         Omit<LayoutProps, 'match'>,
         BreadcrumbsProps,
         BreadcrumbSetters,
-        ExtensionAlertProps {}
+        ExtensionAlertProps,
+        UserRepositoriesUpdateProps {
+    isSourcegraphDotCom: boolean
+}
 
 export interface LayoutRouteProps<Parameters_ extends { [K in keyof Parameters_]?: string }> {
     path: string
@@ -71,7 +76,7 @@ export const routes: readonly LayoutRouteProps<any>[] = [
     {
         path: '/search',
         render: props =>
-            parseSearchURLQuery(props.location.search) ? (
+            props.parsedSearchQuery ? (
                 !isErrorLike(props.settingsCascade.final) &&
                 props.settingsCascade.final?.experimentalFeatures?.searchStreaming ? (
                     <StreamingSearchResults {...props} />
@@ -99,6 +104,7 @@ export const routes: readonly LayoutRouteProps<any>[] = [
             props.showMultilineSearchConsole ? (
                 <SearchConsolePage
                     {...props}
+                    isMacPlatform={isMacPlatform}
                     allExpanded={false}
                     showSavedQueryModal={false}
                     deployType={window.context.deployType}
@@ -183,55 +189,69 @@ export const routes: readonly LayoutRouteProps<any>[] = [
         render: passThroughToServer,
     },
     {
-        path: '/snippets',
-        render: lazyComponent(() => import('./snippets/SnippetsPage'), 'SnippetsPage'),
-    },
-    {
         path: '/insights',
         exact: true,
-        render: lazyComponent(() => import('./insights/InsightsPage'), 'InsightsPage'),
+        render: lazyComponent(() => import('./insights/pages/InsightsPage'), 'InsightsPage'),
         condition: props =>
             !isErrorLike(props.settingsCascade.final) &&
-            !!props.settingsCascade.final?.experimentalFeatures?.codeInsights,
+            !!props.settingsCascade.final?.experimentalFeatures?.codeInsights &&
+            props.settingsCascade.final['insights.displayLocation.insightsPage'] !== false,
     },
     {
         path: '/views',
         render: lazyComponent(() => import('./views/ViewsArea'), 'ViewsArea'),
     },
     {
+        path: '/contexts',
+        render: lazyComponent(() => import('./searchContexts/SearchContextsListPage'), 'SearchContextsListPage'),
+        exact: true,
+        condition: props =>
+            !isErrorLike(props.settingsCascade.final) &&
+            !!props.settingsCascade.final?.experimentalFeatures?.showSearchContext &&
+            !!props.settingsCascade.final?.experimentalFeatures?.showSearchContextManagement,
+    },
+    {
+        path: '/contexts/:id',
+        render: lazyComponent(() => import('./searchContexts/SearchContextPage'), 'SearchContextPage'),
+        condition: props =>
+            !isErrorLike(props.settingsCascade.final) &&
+            !!props.settingsCascade.final?.experimentalFeatures?.showSearchContext &&
+            !!props.settingsCascade.final?.experimentalFeatures?.showSearchContextManagement,
+    },
+    {
         path: '/refactor-python2-to-3',
         render: props => <RepogroupPage {...props} repogroupMetadata={python2To3Metadata} />,
-        condition: props => window.context.sourcegraphDotComMode,
+        condition: ({ isSourcegraphDotCom }) => isSourcegraphDotCom,
     },
     {
         path: '/kubernetes',
         render: props => <RepogroupPage {...props} repogroupMetadata={kubernetes} />,
-        condition: props => window.context.sourcegraphDotComMode,
+        condition: ({ isSourcegraphDotCom }) => isSourcegraphDotCom,
     },
     {
         path: '/golang',
         render: props => <RepogroupPage {...props} repogroupMetadata={golang} />,
-        condition: props => window.context.sourcegraphDotComMode,
+        condition: ({ isSourcegraphDotCom }) => isSourcegraphDotCom,
     },
     {
         path: '/react-hooks',
         render: props => <RepogroupPage {...props} repogroupMetadata={reactHooks} />,
-        condition: props => window.context.sourcegraphDotComMode,
+        condition: ({ isSourcegraphDotCom }) => isSourcegraphDotCom,
     },
     {
         path: '/android',
         render: props => <RepogroupPage {...props} repogroupMetadata={android} />,
-        condition: props => window.context.sourcegraphDotComMode,
+        condition: ({ isSourcegraphDotCom }) => isSourcegraphDotCom,
     },
     {
         path: '/stanford',
         render: props => <RepogroupPage {...props} repogroupMetadata={stanford} />,
-        condition: props => window.context.sourcegraphDotComMode,
+        condition: ({ isSourcegraphDotCom }) => isSourcegraphDotCom,
     },
     {
         path: '/cncf',
         render: props => <RepogroupPage {...props} repogroupMetadata={cncf} />,
-        condition: props => window.context.sourcegraphDotComMode,
+        condition: ({ isSourcegraphDotCom }) => isSourcegraphDotCom,
     },
     {
         path: '/:repoRevAndRest+',

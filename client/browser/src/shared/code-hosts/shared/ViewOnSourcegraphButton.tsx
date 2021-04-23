@@ -1,13 +1,16 @@
 import classNames from 'classnames'
-import React from 'react'
-import { SourcegraphIconButton, SourcegraphIconButtonProps } from '../../components/SourcegraphIconButton'
-import { CodeHostContext } from './codeHost'
-import { ErrorLike, isErrorLike } from '../../../../../shared/src/util/errors'
-import { isHTTPAuthError } from '../../../../../shared/src/backend/fetch'
-import { SignInButton } from './SignInButton'
-import { isPrivateRepoPublicSourcegraphComErrorLike } from '../../../../../shared/src/backend/errors'
 import { snakeCase } from 'lodash'
+import React from 'react'
+
+import { isPrivateRepoPublicSourcegraphComErrorLike } from '@sourcegraph/shared/src/backend/errors'
+import { isHTTPAuthError } from '@sourcegraph/shared/src/backend/fetch'
+import { ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+
+import { SourcegraphIconButton, SourcegraphIconButtonProps } from '../../components/SourcegraphIconButton'
 import { getPlatformName } from '../../util/context'
+
+import { CodeHostContext } from './codeHost'
+import { SignInButton } from './SignInButton'
 
 export interface ViewOnSourcegraphButtonClassProps {
     className?: string
@@ -89,8 +92,8 @@ export const ViewOnSourcegraphButton: React.FunctionComponent<ViewOnSourcegraphB
                 <SourcegraphIconButton
                     {...commonErrorCaseProps}
                     label="Configure Sourcegraph"
-                    title="Setup Sourcegraph for search and code intelligence on private repositories"
-                    ariaLabel="Setup Sourcegraph for search and code intelligence on private repositories"
+                    title="Set up Sourcegraph for search and code intelligence on private repositories"
+                    ariaLabel="Set up Sourcegraph for search and code intelligence on private repositories"
                 />
             )
         }

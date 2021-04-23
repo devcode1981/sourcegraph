@@ -1,23 +1,36 @@
+import * as H from 'history'
 import AlertCircleIcon from 'mdi-react/AlertCircleIcon'
 import MapSearchIcon from 'mdi-react/MapSearchIcon'
 import MenuDownIcon from 'mdi-react/MenuDownIcon'
 import React, { useMemo } from 'react'
 import { Route, RouteComponentProps, Switch } from 'react-router'
 import { UncontrolledPopover } from 'reactstrap'
+
 import {
     CloneInProgressError,
     isCloneInProgressErrorLike,
     isRevisionNotFoundErrorLike,
     isRepoNotFoundErrorLike,
-} from '../../../shared/src/backend/errors'
-import { ActivationProps } from '../../../shared/src/components/activation/Activation'
-import { ExtensionsControllerProps } from '../../../shared/src/extensions/controller'
-import { PlatformContextProps } from '../../../shared/src/platform/context'
-import { SettingsCascadeProps } from '../../../shared/src/settings/settings'
-import { ErrorLike, isErrorLike } from '../../../shared/src/util/errors'
+} from '@sourcegraph/shared/src/backend/errors'
+import { ActivationProps } from '@sourcegraph/shared/src/components/activation/Activation'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { VersionContextProps } from '@sourcegraph/shared/src/search/util'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { RevisionSpec } from '@sourcegraph/shared/src/util/url'
+
+import { AuthenticatedUser } from '../auth'
+import { ErrorMessage } from '../components/alerts'
+import { BreadcrumbSetters } from '../components/Breadcrumbs'
 import { HeroPage } from '../components/HeroPage'
-import { ThemeProps } from '../../../shared/src/theme'
+import { ActionItemsBarProps } from '../extensions/components/ActionItemsBar'
+import { RepositoryFields } from '../graphql-operations'
+import { PatternTypeProps, CaseSensitivityProps, CopyQueryButtonProps, SearchContextProps } from '../search'
 import { RouteDescriptor } from '../util/contributions'
+
 import { CopyLinkAction } from './actions/CopyLinkAction'
 import { GoToPermalinkAction } from './actions/GoToPermalinkAction'
 import { ResolvedRevision } from './backend'
@@ -26,17 +39,8 @@ import { RepoHeaderContributionsLifecycleProps } from './RepoHeader'
 import { RepoHeaderContributionPortal } from './RepoHeaderContributionPortal'
 import { EmptyRepositoryPage, RepositoryCloningInProgressPage } from './RepositoryGitDataContainer'
 import { RevisionsPopover } from './RevisionsPopover'
-import { PatternTypeProps, CaseSensitivityProps, CopyQueryButtonProps } from '../search'
 import { RepoSettingsAreaRoute } from './settings/RepoSettingsArea'
-import { ErrorMessage } from '../components/alerts'
-import * as H from 'history'
-import { VersionContextProps } from '../../../shared/src/search/util'
-import { RevisionSpec } from '../../../shared/src/util/url'
 import { RepoSettingsSideBarGroup } from './settings/RepoSettingsSidebar'
-import { BreadcrumbSetters } from '../components/Breadcrumbs'
-import { AuthenticatedUser } from '../auth'
-import { TelemetryProps } from '../../../shared/src/telemetry/telemetryService'
-import { RepositoryFields } from '../graphql-operations'
 
 /** Props passed to sub-routes of {@link RepoRevisionContainer}. */
 export interface RepoRevisionContainerContext
@@ -53,8 +57,10 @@ export interface RepoRevisionContainerContext
         CaseSensitivityProps,
         CopyQueryButtonProps,
         VersionContextProps,
+        Pick<SearchContextProps, 'selectedSearchContextSpec'>,
         RevisionSpec,
-        BreadcrumbSetters {
+        BreadcrumbSetters,
+        ActionItemsBarProps {
     repo: RepositoryFields
     resolvedRev: ResolvedRevision
 
@@ -81,8 +87,10 @@ interface RepoRevisionContainerProps
         CaseSensitivityProps,
         CopyQueryButtonProps,
         VersionContextProps,
+        Pick<SearchContextProps, 'selectedSearchContextSpec'>,
         RevisionSpec,
-        BreadcrumbSetters {
+        BreadcrumbSetters,
+        ActionItemsBarProps {
     routes: readonly RepoRevisionContainerRoute[]
     repoSettingsAreaRoutes: readonly RepoSettingsAreaRoute[]
     repoSettingsSidebarGroups: readonly RepoSettingsSideBarGroup[]
@@ -205,7 +213,7 @@ export const RepoRevisionContainer: React.FunctionComponent<RepoRevisionContaine
             <HeroPage
                 icon={AlertCircleIcon}
                 title="Error"
-                subtitle={<ErrorMessage error={props.resolvedRevisionOrError} history={props.history} />}
+                subtitle={<ErrorMessage error={props.resolvedRevisionOrError} />}
             />
         )
     }
@@ -215,6 +223,8 @@ export const RepoRevisionContainer: React.FunctionComponent<RepoRevisionContaine
         ...breadcrumbSetters,
         resolvedRev: props.resolvedRevisionOrError,
     }
+
+    const resolvedRevisionOrError = props.resolvedRevisionOrError
 
     return (
         <div className="repo-revision-container">
@@ -231,27 +241,31 @@ export const RepoRevisionContainer: React.FunctionComponent<RepoRevisionContaine
                             />
                         )
                 )}
-                {/* eslint-enable react/jsx-no-bind */}
             </Switch>
             <RepoHeaderContributionPortal
                 position="left"
-                element={<CopyLinkAction key="copy-link" location={props.location} />}
+                id="copy-link"
                 repoHeaderContributionsLifecycleProps={props.repoHeaderContributionsLifecycleProps}
-            />
+            >
+                {() => <CopyLinkAction key="copy-link" location={props.location} />}
+            </RepoHeaderContributionPortal>
             <RepoHeaderContributionPortal
                 position="right"
                 priority={3}
-                element={
+                id="go-to-permalink"
+                repoHeaderContributionsLifecycleProps={props.repoHeaderContributionsLifecycleProps}
+            >
+                {context => (
                     <GoToPermalinkAction
                         key="go-to-permalink"
                         revision={props.revision}
-                        commitID={props.resolvedRevisionOrError.commitID}
+                        commitID={resolvedRevisionOrError.commitID}
                         location={props.location}
                         history={props.history}
+                        {...context}
                     />
-                }
-                repoHeaderContributionsLifecycleProps={props.repoHeaderContributionsLifecycleProps}
-            />
+                )}
+            </RepoHeaderContributionPortal>
         </div>
     )
 }

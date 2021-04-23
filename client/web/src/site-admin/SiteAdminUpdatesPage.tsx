@@ -1,24 +1,26 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import { parseISO } from 'date-fns'
 import formatDistance from 'date-fns/formatDistance'
 import CheckIcon from 'mdi-react/CheckIcon'
 import CloudDownloadIcon from 'mdi-react/CloudDownloadIcon'
 import React, { useMemo } from 'react'
-import { RouteComponentProps } from 'react-router'
 import { Link } from 'react-router-dom'
-import { PageTitle } from '../components/PageTitle'
-import { fetchSiteUpdateCheck } from './backend'
-import { ErrorAlert } from '../components/alerts'
-import { TelemetryProps } from '../../../shared/src/telemetry/telemetryService'
-import { useObservable } from '../../../shared/src/util/useObservable'
-import { isErrorLike } from '../../../shared/src/util/errors'
 
-interface Props extends Pick<RouteComponentProps<{}>, 'history'>, TelemetryProps {}
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
+
+import { ErrorAlert } from '../components/alerts'
+import { PageTitle } from '../components/PageTitle'
+
+import { fetchSiteUpdateCheck } from './backend'
+
+interface Props extends TelemetryProps {}
 
 /**
  * A page displaying information about available updates for the server.
  */
-export const SiteAdminUpdatesPage: React.FunctionComponent<Props> = ({ history, telemetryService }) => {
+export const SiteAdminUpdatesPage: React.FunctionComponent<Props> = ({ telemetryService }) => {
     useMemo(() => {
         telemetryService.logViewEvent('SiteAdminUpdates')
     }, [telemetryService])
@@ -36,9 +38,7 @@ export const SiteAdminUpdatesPage: React.FunctionComponent<Props> = ({ history, 
         <div className="site-admin-updates-page">
             <PageTitle title="Updates - Admin" />
             <h2>Updates</h2>
-            {isErrorLike(state) && (
-                <ErrorAlert className="site-admin-updates-page__error" history={history} error={state} />
-            )}
+            {isErrorLike(state) && <ErrorAlert className="site-admin-updates-page__error" error={state} />}
             {updateCheck && (updateCheck.pending || updateCheck.checkedAt) && (
                 <div>
                     {updateCheck.pending && (
@@ -62,7 +62,6 @@ export const SiteAdminUpdatesPage: React.FunctionComponent<Props> = ({ history, 
                             className="site-admin-updates-page__alert"
                             prefix="Error checking for updates"
                             error={updateCheck.errorMessage}
-                            history={history}
                         />
                     )}
                 </div>

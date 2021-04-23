@@ -5,30 +5,32 @@ import { act } from 'react-dom/test-utils'
 import { BrowserRouter } from 'react-router-dom'
 import { NEVER, of } from 'rxjs'
 import sinon from 'sinon'
-import { FileMatch } from '../../../../../shared/src/components/FileMatch'
-import { VirtualList } from '../../../../../shared/src/components/VirtualList'
-import { SearchPatternType } from '../../../../../shared/src/graphql-operations'
-import * as GQL from '../../../../../shared/src/graphql/schema'
-import { NOOP_TELEMETRY_SERVICE } from '../../../../../shared/src/telemetry/telemetryService'
-import { SearchResult } from '../../../components/SearchResult'
-import { SavedSearchModal } from '../../../savedSearches/SavedSearchModal'
-import * as helpers from '../../helpers'
-import { AggregateStreamingSearchResults } from '../../stream'
-import { SearchResultsInfoBar } from '../SearchResultsInfoBar'
-import { VersionContextWarning } from '../VersionContextWarning'
-import { StreamingProgress } from './progress/StreamingProgress'
-import { StreamingSearchResults, StreamingSearchResultsProps } from './StreamingSearchResults'
+
+import { FileMatch } from '@sourcegraph/shared/src/components/FileMatch'
+import { VirtualList } from '@sourcegraph/shared/src/components/VirtualList'
+import { SearchPatternType } from '@sourcegraph/shared/src/graphql-operations'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { NOOP_TELEMETRY_SERVICE } from '@sourcegraph/shared/src/telemetry/telemetryService'
 import {
     extensionsController,
     HIGHLIGHTED_FILE_LINES_REQUEST,
     MULTIPLE_SEARCH_RESULT,
     REPO_MATCH_RESULT,
     RESULT,
-} from '../../../../../shared/src/util/searchTestHelpers'
+} from '@sourcegraph/shared/src/util/searchTestHelpers'
+
+import { SearchResult } from '../../../components/SearchResult'
+import { SavedSearchModal } from '../../../savedSearches/SavedSearchModal'
+import * as helpers from '../../helpers'
+import { AggregateStreamingSearchResults } from '../../stream'
+import { SearchResultsInfoBar } from '../SearchResultsInfoBar'
+import { VersionContextWarning } from '../VersionContextWarning'
+
+import { StreamingProgress } from './progress/StreamingProgress'
+import { StreamingSearchResults, StreamingSearchResultsProps } from './StreamingSearchResults'
 
 describe('StreamingSearchResults', () => {
     const history = createBrowserHistory()
-    history.replace({ search: 'q=r:golang/oauth2+test+f:travis' })
 
     const streamingSearchResult: AggregateStreamingSearchResults = {
         state: 'complete',
@@ -42,12 +44,10 @@ describe('StreamingSearchResults', () => {
     }
 
     const defaultProps: StreamingSearchResultsProps = {
+        parsedSearchQuery: 'r:golang/oauth2 test f:travis',
         caseSensitive: false,
-        setCaseSensitivity: sinon.spy(),
         patternType: SearchPatternType.literal,
-        setPatternType: sinon.spy(),
         versionContext: undefined,
-        setVersionContext: sinon.spy(),
         availableVersionContexts: [],
         previousVersionContext: null,
 
@@ -58,7 +58,7 @@ describe('StreamingSearchResults', () => {
         location: history.location,
         authenticatedUser: null,
 
-        navbarSearchQueryState: { query: '', cursorPosition: 0 },
+        navbarSearchQueryState: { query: '' },
 
         settingsCascade: {
             subjects: null,
@@ -70,20 +70,20 @@ describe('StreamingSearchResults', () => {
 
         fetchHighlightedFileLineRanges: HIGHLIGHTED_FILE_LINES_REQUEST,
         isLightTheme: true,
+        enableCodeMonitoring: false,
     }
 
     it('should call streaming search API with the right parameters from URL', () => {
-        const history = createBrowserHistory()
-        history.replace({ search: 'q=r:golang/oauth2+test+f:travis+case:yes&patternType=regexp&c=test' })
-
         const searchSpy = sinon.spy(defaultProps.streamSearch)
 
         const element = mount(
             <BrowserRouter>
                 <StreamingSearchResults
                     {...defaultProps}
-                    history={history}
-                    location={history.location}
+                    parsedSearchQuery="r:golang/oauth2 test f:travis"
+                    patternType={SearchPatternType.regexp}
+                    caseSensitive={true}
+                    versionContext="test"
                     streamSearch={searchSpy}
                     availableVersionContexts={[{ name: 'test', revisions: [] }]}
                 />
@@ -91,13 +91,14 @@ describe('StreamingSearchResults', () => {
         )
 
         sinon.assert.calledOnce(searchSpy)
-        sinon.assert.calledWith(
-            searchSpy,
-            'r:golang/oauth2 test f:travis  case:yes',
-            'V2',
-            SearchPatternType.regexp,
-            'test'
-        )
+        sinon.assert.calledWith(searchSpy, {
+            query: 'r:golang/oauth2 test f:travis',
+            version: 'V2',
+            patternType: SearchPatternType.regexp,
+            caseSensitive: true,
+            versionContext: 'test',
+            trace: undefined,
+        })
 
         element.unmount()
     })
@@ -112,8 +113,10 @@ describe('StreamingSearchResults', () => {
             <BrowserRouter>
                 <StreamingSearchResults
                     {...defaultProps}
-                    history={history}
-                    location={history.location}
+                    parsedSearchQuery="r:golang/oauth2 test f:travis"
+                    patternType={SearchPatternType.regexp}
+                    caseSensitive={false}
+                    versionContext="test"
                     streamSearch={searchSpy}
                     availableVersionContexts={[{ name: 'something', revisions: [] }]}
                 />
@@ -121,239 +124,14 @@ describe('StreamingSearchResults', () => {
         )
 
         sinon.assert.calledOnce(searchSpy)
-        sinon.assert.calledWith(
-            searchSpy,
-            'r:golang/oauth2 test f:travis  case:yes',
-            'V2',
-            SearchPatternType.regexp,
-            undefined
-        )
-
-        element.unmount()
-    })
-
-    it('should update patternType if different between URL and context', () => {
-        const history = createBrowserHistory()
-        history.replace({ search: 'q=r:golang/oauth2+test+f:travis&patternType=regexp' })
-
-        const setPatternTypeSpy = sinon.spy()
-
-        const element = mount(
-            <BrowserRouter>
-                <StreamingSearchResults
-                    {...defaultProps}
-                    history={history}
-                    location={history.location}
-                    patternType={SearchPatternType.literal}
-                    setPatternType={setPatternTypeSpy}
-                />
-            </BrowserRouter>
-        )
-
-        sinon.assert.calledOnce(setPatternTypeSpy)
-        sinon.assert.calledWith(setPatternTypeSpy, SearchPatternType.regexp)
-
-        element.unmount()
-    })
-
-    it('should not update patternType if URL and context are the same', () => {
-        const history = createBrowserHistory()
-        history.replace({ search: 'q=r:golang/oauth2+test+f:travis&patternType=regexp' })
-
-        const setPatternTypeSpy = sinon.spy()
-
-        const element = mount(
-            <BrowserRouter>
-                <StreamingSearchResults
-                    {...defaultProps}
-                    history={history}
-                    location={history.location}
-                    patternType={SearchPatternType.regexp}
-                    setPatternType={setPatternTypeSpy}
-                />
-            </BrowserRouter>
-        )
-
-        sinon.assert.notCalled(setPatternTypeSpy)
-
-        element.unmount()
-    })
-
-    it('should update caseSensitive if different between URL and context', () => {
-        const history = createBrowserHistory()
-        history.replace({ search: 'q=r:golang/oauth2+test+f:travis case:yes' })
-
-        const setCaseSensitivitySpy = sinon.spy()
-
-        const element = mount(
-            <BrowserRouter>
-                <StreamingSearchResults
-                    {...defaultProps}
-                    history={history}
-                    location={history.location}
-                    caseSensitive={false}
-                    setCaseSensitivity={setCaseSensitivitySpy}
-                />
-            </BrowserRouter>
-        )
-
-        sinon.assert.calledOnce(setCaseSensitivitySpy)
-        sinon.assert.calledWith(setCaseSensitivitySpy, true)
-
-        element.unmount()
-    })
-
-    it('should not update caseSensitive if URL and context are the same', () => {
-        const history = createBrowserHistory()
-        history.replace({ search: 'q=r:golang/oauth2+test+f:travis+case:yes' })
-
-        const setCaseSensitivitySpy = sinon.spy()
-
-        const element = mount(
-            <BrowserRouter>
-                <StreamingSearchResults
-                    {...defaultProps}
-                    history={history}
-                    location={history.location}
-                    caseSensitive={true}
-                    setCaseSensitivity={setCaseSensitivitySpy}
-                />
-            </BrowserRouter>
-        )
-
-        sinon.assert.notCalled(setCaseSensitivitySpy)
-
-        element.unmount()
-    })
-
-    it('should update versionContext if different between URL and context', () => {
-        const history = createBrowserHistory()
-        history.replace({ search: 'q=r:golang/oauth2+test+f:travis&c=test' })
-
-        const setVersionContextSpy = sinon.spy()
-
-        const element = mount(
-            <BrowserRouter>
-                <StreamingSearchResults
-                    {...defaultProps}
-                    history={history}
-                    location={history.location}
-                    versionContext="other"
-                    setVersionContext={setVersionContextSpy}
-                    availableVersionContexts={[
-                        { name: 'test', revisions: [] },
-                        { name: 'other', revisions: [] },
-                    ]}
-                />
-            </BrowserRouter>
-        )
-
-        sinon.assert.calledOnce(setVersionContextSpy)
-        sinon.assert.calledWith(setVersionContextSpy, 'test')
-
-        element.unmount()
-    })
-
-    it('should not update versionContext if same between URL and context', () => {
-        const history = createBrowserHistory()
-        history.replace({ search: 'q=r:golang/oauth2+test+f:travis&c=test' })
-
-        const setVersionContextSpy = sinon.spy()
-
-        const element = mount(
-            <BrowserRouter>
-                <StreamingSearchResults
-                    {...defaultProps}
-                    history={history}
-                    location={history.location}
-                    versionContext="test"
-                    setVersionContext={setVersionContextSpy}
-                    availableVersionContexts={[
-                        { name: 'test', revisions: [] },
-                        { name: 'other', revisions: [] },
-                    ]}
-                />
-            </BrowserRouter>
-        )
-
-        sinon.assert.notCalled(setVersionContextSpy)
-
-        element.unmount()
-    })
-
-    it('should clear versionContext if updating to clear', () => {
-        const history = createBrowserHistory()
-        history.replace({ search: 'q=r:golang/oauth2+test+f:travis' })
-
-        const setVersionContextSpy = sinon.spy()
-
-        const element = mount(
-            <BrowserRouter>
-                <StreamingSearchResults
-                    {...defaultProps}
-                    history={history}
-                    location={history.location}
-                    versionContext="test"
-                    setVersionContext={setVersionContextSpy}
-                    availableVersionContexts={[
-                        { name: 'test', revisions: [] },
-                        { name: 'other', revisions: [] },
-                    ]}
-                />
-            </BrowserRouter>
-        )
-
-        sinon.assert.calledOnce(setVersionContextSpy)
-        sinon.assert.calledWith(setVersionContextSpy, undefined)
-
-        element.unmount()
-    })
-
-    it('should clear versionContext if updating to invalid one', () => {
-        const history = createBrowserHistory()
-        history.replace({ search: 'q=r:golang/oauth2+test+f:travis&c=test' })
-
-        const setVersionContextSpy = sinon.spy()
-
-        const element = mount(
-            <BrowserRouter>
-                <StreamingSearchResults
-                    {...defaultProps}
-                    history={history}
-                    location={history.location}
-                    versionContext="other"
-                    setVersionContext={setVersionContextSpy}
-                    availableVersionContexts={[{ name: 'other', revisions: [] }]}
-                />
-            </BrowserRouter>
-        )
-
-        sinon.assert.calledOnce(setVersionContextSpy)
-        sinon.assert.calledWith(setVersionContextSpy, undefined)
-
-        element.unmount()
-    })
-
-    it('should retain clear versionContext if updating to invalid one', () => {
-        const history = createBrowserHistory()
-        history.replace({ search: 'q=r:golang/oauth2+test+f:travis&c=test' })
-
-        const setVersionContextSpy = sinon.spy()
-
-        const element = mount(
-            <BrowserRouter>
-                <StreamingSearchResults
-                    {...defaultProps}
-                    history={history}
-                    location={history.location}
-                    versionContext={undefined}
-                    setVersionContext={setVersionContextSpy}
-                    availableVersionContexts={[{ name: 'other', revisions: [] }]}
-                />
-            </BrowserRouter>
-        )
-
-        sinon.assert.notCalled(setVersionContextSpy)
+        sinon.assert.calledWith(searchSpy, {
+            query: 'r:golang/oauth2 test f:travis',
+            version: 'V2',
+            patternType: SearchPatternType.regexp,
+            caseSensitive: false,
+            versionContext: undefined,
+            trace: undefined,
+        })
 
         element.unmount()
     })
@@ -463,10 +241,33 @@ describe('StreamingSearchResults', () => {
             </BrowserRouter>
         )
 
-        const renderedResultsList = element.find(VirtualList).prop('items')
+        const listComponent = element.find<VirtualList<SearchResult>>(VirtualList)
+        const renderedResultsList = listComponent.prop('items')
         expect(renderedResultsList.length).toBe(2)
-        expect(renderedResultsList[0].type).toBe(FileMatch)
-        expect(renderedResultsList[1].type).toBe(SearchResult)
+        expect(listComponent.prop('renderItem')(renderedResultsList[0], undefined).type).toBe(FileMatch)
+        expect(listComponent.prop('renderItem')(renderedResultsList[1], undefined).type).toBe(SearchResult)
+
+        element.unmount()
+    })
+
+    it('should log view, query, and results fetched events', () => {
+        const logSpy = sinon.spy()
+        const logViewEventSpy = sinon.spy()
+        const telemetryService = {
+            ...NOOP_TELEMETRY_SERVICE,
+            log: logSpy,
+            logViewEvent: logViewEventSpy,
+        }
+
+        const element = mount(
+            <BrowserRouter>
+                <StreamingSearchResults {...defaultProps} telemetryService={telemetryService} />
+            </BrowserRouter>
+        )
+
+        sinon.assert.calledOnceWithExactly(logViewEventSpy, 'SearchResults')
+        sinon.assert.calledWith(logSpy, 'SearchResultsQueried')
+        sinon.assert.calledWith(logSpy, 'SearchResultsFetched')
 
         element.unmount()
     })
@@ -487,7 +288,6 @@ describe('StreamingSearchResults', () => {
         const item = element.find(FileMatch).first()
         act(() => item.prop('onSelect')())
 
-        sinon.assert.calledOnce(logSpy)
         sinon.assert.calledWith(logSpy, 'SearchResultClicked')
 
         element.unmount()
@@ -538,20 +338,39 @@ describe('StreamingSearchResults', () => {
         expect(modal.length).toBe(0)
     })
 
-    it('should start a new search with added params when onSearchAgain event in triggered', () => {
+    it('should start a new search with added params when onSearchAgain event is triggered', () => {
         const submitSearchMock = jest.spyOn(helpers, 'submitSearch').mockImplementation(() => {})
-        const element = mount(
-            <BrowserRouter>
-                <StreamingSearchResults {...defaultProps} />
-            </BrowserRouter>
-        )
+        const tests = [
+            {
+                parsedSearchQuery: 'r:golang/oauth2 test f:travis',
+                additionalProperties: ['count:1000', 'archived:yes', 'timeout:2m'],
+                want: 'r:golang/oauth2 test f:travis count:1000 archived:yes timeout:2m',
+            },
+            {
+                parsedSearchQuery: 'r:golang/oauth2 test f:travis count:50',
+                additionalProperties: ['count:1000', 'archived:yes', 'timeout:2m'],
+                want: 'r:golang/oauth2 test f:travis count:1000 archived:yes timeout:2m',
+            },
+            {
+                parsedSearchQuery: 'r:golang/oauth2 (foo count:1) or (bar count:2)',
+                additionalProperties: ['count:1000', 'fork:yes'],
+                want: 'r:golang/oauth2 (foo count:1000) or (bar count:1000) fork:yes',
+            },
+        ]
+        for (const [index, test] of tests.entries()) {
+            const element = mount(
+                <BrowserRouter>
+                    <StreamingSearchResults {...defaultProps} parsedSearchQuery={test.parsedSearchQuery} />
+                </BrowserRouter>
+            )
 
-        const progress = element.find(StreamingProgress)
-        act(() => progress.prop('onSearchAgain')(['archived:yes', 'timeout:2m']))
-        element.update()
+            const progress = element.find(StreamingProgress)
+            act(() => progress.prop('onSearchAgain')(test.additionalProperties))
+            element.update()
 
-        expect(helpers.submitSearch).toBeCalledTimes(1)
-        const args = submitSearchMock.mock.calls[0][0]
-        expect(args.query).toBe('r:golang/oauth2 test f:travis archived:yes timeout:2m')
+            expect(helpers.submitSearch).toBeCalledTimes(index + 1)
+            const args = submitSearchMock.mock.calls[index][0]
+            expect(args.query).toBe(test.want)
+        }
     })
 })

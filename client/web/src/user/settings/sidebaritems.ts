@@ -1,3 +1,4 @@
+import { showAccountSecurityPage, showPasswordsPage, allowUserExternalServicePublic } from './cloud-ga'
 import { UserSettingsSidebarItems } from './UserSettingsSidebar'
 
 export const userSettingsSideBarItems: UserSettingsSidebarItems = {
@@ -17,7 +18,7 @@ export const userSettingsSideBarItems: UserSettingsSidebarItems = {
             to: '/password',
             exact: true,
             // Only the builtin auth provider has a password.
-            condition: ({ user }) => user.builtinAuth,
+            condition: showPasswordsPage,
         },
         {
             label: 'Emails',
@@ -29,23 +30,28 @@ export const userSettingsSideBarItems: UserSettingsSidebarItems = {
             to: '/tokens',
             condition: () => window.context.accessTokensAllow !== 'none',
         },
+        //  future GA Cloud nav items
         {
-            label: 'Code hosts',
-            to: '/external-services',
-            condition: props =>
-                window.context.externalServicesUserModeEnabled ||
-                (props.user.id === props.authenticatedUser.id &&
-                    props.authenticatedUser.tags.includes('AllowUserExternalServicePublic')) ||
-                props.user.tags?.includes('AllowUserExternalServicePublic'),
+            label: 'Account security',
+            to: '/security',
+            exact: true,
+            condition: showAccountSecurityPage,
+        },
+        {
+            label: 'Code host connections',
+            to: '/code-hosts',
+            condition: allowUserExternalServicePublic,
         },
         {
             label: 'Repositories',
             to: '/repositories',
-            condition: props =>
-                window.context.externalServicesUserModeEnabled ||
-                (props.user.id === props.authenticatedUser.id &&
-                    props.authenticatedUser.tags.includes('AllowUserExternalServicePublic')) ||
-                props.user.tags?.includes('AllowExternalServicePublic'),
+            condition: allowUserExternalServicePublic,
+        },
+        {
+            label: 'Product research',
+            to: '/product-research',
+            condition: () => window.context.productResearchPageEnabled,
+            status: 'new',
         },
     ],
 }

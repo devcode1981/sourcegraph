@@ -1,6 +1,8 @@
 import React from 'react'
-import * as GQL from '../../../../shared/src/graphql/schema'
-import { formatUserCount } from './helpers'
+
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+
+import { formatUserCount } from '../../productSubscription/helpers'
 
 export const ProductLicenseInfoDescription: React.FunctionComponent<{
     licenseInfo: GQL.IProductLicenseInfo

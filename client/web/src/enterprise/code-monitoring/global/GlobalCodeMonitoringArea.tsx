@@ -1,14 +1,16 @@
-import React, { useMemo } from 'react'
+import React from 'react'
 import { Redirect, Route, RouteComponentProps, Switch } from 'react-router'
-import { CodeMonitoringProps } from '..'
-import { ExtensionsControllerProps } from '../../../../../shared/src/extensions/controller'
-import { PlatformContextProps } from '../../../../../shared/src/platform/context'
-import { SettingsCascadeProps } from '../../../../../shared/src/settings/settings'
-import { TelemetryProps } from '../../../../../shared/src/telemetry/telemetryService'
-import { ThemeProps } from '../../../../../shared/src/theme'
+
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+
 import { AuthenticatedUser } from '../../../auth'
 import { withAuthenticatedUser } from '../../../auth/withAuthenticatedUser'
-import { BreadcrumbsProps, BreadcrumbSetters, Breadcrumbs } from '../../../components/Breadcrumbs'
+import { CodeMonitoringProps } from '../../../code-monitoring'
+import { Page } from '../../../components/Page'
 import { lazyComponent } from '../../../util/lazyComponent'
 import { CodeMonitoringPageProps } from '../CodeMonitoringPage'
 import { CreateCodeMonitorPageProps } from '../CreateCodeMonitorPage'
@@ -20,8 +22,6 @@ interface Props
         ExtensionsControllerProps,
         TelemetryProps,
         PlatformContextProps,
-        BreadcrumbsProps,
-        BreadcrumbSetters,
         CodeMonitoringProps,
         SettingsCascadeProps {
     authenticatedUser: AuthenticatedUser | null
@@ -36,7 +36,6 @@ const CreateCodeMonitorPage = lazyComponent<CreateCodeMonitorPageProps, 'CreateC
     () => import('../CreateCodeMonitorPage'),
     'CreateCodeMonitorPage'
 )
-
 const ManageCodeMonitorPage = lazyComponent<ManageCodeMonitorPageProps, 'ManageCodeMonitorPage'>(
     () => import('../ManageCodeMonitorPage'),
     'ManageCodeMonitorPage'
@@ -54,41 +53,32 @@ interface AuthenticatedProps extends Props {
 }
 
 export const AuthenticatedCodeMonitoringArea = withAuthenticatedUser<AuthenticatedProps>(({ match, ...outerProps }) => {
-    const breadcrumbSetters = outerProps.useBreadcrumb(
-        useMemo(
-            () => ({
-                key: 'Code Monitoring',
-                element: <>Code Monitoring</>,
-            }),
-            []
-        )
-    )
+    if (!outerProps.authenticatedUser) {
+        return <Redirect to="/sign-in" />
+    }
 
-    return outerProps.authenticatedUser ? (
+    return (
         <div className="w-100">
-            <Breadcrumbs breadcrumbs={outerProps.breadcrumbs} location={outerProps.location} />
-            <div className="container web-content">
+            <Page>
                 {/* eslint-disable react/jsx-no-bind */}
                 <Switch>
                     <Route
-                        render={props => <CodeMonitoringPage {...outerProps} {...props} {...breadcrumbSetters} />}
+                        render={props => <CodeMonitoringPage {...outerProps} {...props} />}
                         path={match.url}
                         exact={true}
                     />
                     <Route
                         path={`${match.url}/new`}
-                        render={props => <CreateCodeMonitorPage {...outerProps} {...props} {...breadcrumbSetters} />}
+                        render={props => <CreateCodeMonitorPage {...outerProps} {...props} />}
                         exact={true}
                     />
                     <Route
                         path={`${match.path}/:id`}
-                        render={props => <ManageCodeMonitorPage {...outerProps} {...props} {...breadcrumbSetters} />}
+                        render={props => <ManageCodeMonitorPage {...outerProps} {...props} />}
                         exact={true}
                     />
                 </Switch>
-            </div>
+            </Page>
         </div>
-    ) : (
-        <Redirect to="/sign-in" />
     )
 })

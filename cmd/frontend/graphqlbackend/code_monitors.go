@@ -2,7 +2,6 @@ package graphqlbackend
 
 import (
 	"context"
-	"errors"
 
 	"github.com/graph-gophers/graphql-go"
 
@@ -20,6 +19,9 @@ type CodeMonitorsResolver interface {
 	DeleteCodeMonitor(ctx context.Context, args *DeleteCodeMonitorArgs) (*EmptyResponse, error)
 	UpdateCodeMonitor(ctx context.Context, args *UpdateCodeMonitorArgs) (MonitorResolver, error)
 	ResetTriggerQueryTimestamps(ctx context.Context, args *ResetTriggerQueryTimestampsArgs) (*EmptyResponse, error)
+	TriggerTestEmailAction(ctx context.Context, args *TriggerTestEmailActionArgs) (*EmptyResponse, error)
+
+	NodeResolvers() map[string]NodeByIDFunc
 }
 
 type MonitorConnectionResolver interface {
@@ -159,6 +161,12 @@ type ResetTriggerQueryTimestampsArgs struct {
 	Id graphql.ID
 }
 
+type TriggerTestEmailActionArgs struct {
+	Namespace   graphql.ID
+	Description string
+	Email       *CreateActionEmailArgs
+}
+
 type CreateMonitorArgs struct {
 	Namespace   graphql.ID
 	Description string
@@ -188,39 +196,4 @@ type UpdateCodeMonitorArgs struct {
 	Monitor *EditMonitorArgs
 	Trigger *EditTriggerArgs
 	Actions []*EditActionArgs
-}
-
-var DefaultCodeMonitorsResolver = &defaultCodeMonitorsResolver{}
-
-var codeMonitorsOnlyInEnterprise = errors.New("code monitors are only available in enterprise")
-
-type defaultCodeMonitorsResolver struct {
-}
-
-func (d defaultCodeMonitorsResolver) MonitorByID(ctx context.Context, id graphql.ID) (MonitorResolver, error) {
-	return nil, codeMonitorsOnlyInEnterprise
-}
-
-func (d defaultCodeMonitorsResolver) Monitors(ctx context.Context, userID int32, args *ListMonitorsArgs) (MonitorConnectionResolver, error) {
-	return nil, codeMonitorsOnlyInEnterprise
-}
-
-func (d defaultCodeMonitorsResolver) CreateCodeMonitor(ctx context.Context, args *CreateCodeMonitorArgs) (MonitorResolver, error) {
-	return nil, codeMonitorsOnlyInEnterprise
-}
-
-func (d defaultCodeMonitorsResolver) ToggleCodeMonitor(ctx context.Context, args *ToggleCodeMonitorArgs) (MonitorResolver, error) {
-	return nil, codeMonitorsOnlyInEnterprise
-}
-
-func (d defaultCodeMonitorsResolver) DeleteCodeMonitor(ctx context.Context, args *DeleteCodeMonitorArgs) (*EmptyResponse, error) {
-	return nil, codeMonitorsOnlyInEnterprise
-}
-
-func (d defaultCodeMonitorsResolver) UpdateCodeMonitor(ctx context.Context, args *UpdateCodeMonitorArgs) (MonitorResolver, error) {
-	return nil, codeMonitorsOnlyInEnterprise
-}
-
-func (d defaultCodeMonitorsResolver) ResetTriggerQueryTimestamps(ctx context.Context, args *ResetTriggerQueryTimestampsArgs) (*EmptyResponse, error) {
-	return nil, codeMonitorsOnlyInEnterprise
 }

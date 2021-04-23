@@ -9,37 +9,48 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/sourcegraph/sourcegraph/internal/encryption/keyring"
 
 	"github.com/inconshreveable/log15"
+	jsoniter "github.com/json-iterator/go"
+	"github.com/pkg/errors"
 
 	"github.com/sourcegraph/sourcegraph/cmd/gitserver/server"
 	"github.com/sourcegraph/sourcegraph/internal/api"
 	"github.com/sourcegraph/sourcegraph/internal/authz"
 	"github.com/sourcegraph/sourcegraph/internal/conf"
-	"github.com/sourcegraph/sourcegraph/internal/db"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbutil"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbconn"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	"github.com/sourcegraph/sourcegraph/internal/debugserver"
 	"github.com/sourcegraph/sourcegraph/internal/env"
+	"github.com/sourcegraph/sourcegraph/internal/extsvc"
+	"github.com/sourcegraph/sourcegraph/internal/jsonc"
 	"github.com/sourcegraph/sourcegraph/internal/logging"
 	"github.com/sourcegraph/sourcegraph/internal/profiler"
 	"github.com/sourcegraph/sourcegraph/internal/trace"
 	"github.com/sourcegraph/sourcegraph/internal/trace/ot"
 	"github.com/sourcegraph/sourcegraph/internal/tracer"
+	"github.com/sourcegraph/sourcegraph/internal/types"
+	"github.com/sourcegraph/sourcegraph/schema"
 )
 
 var (
-	reposDir          = env.Get("SRC_REPOS_DIR", "/data/repos", "Root dir containing repos.")
-	runRepoCleanup, _ = strconv.ParseBool(env.Get("SRC_RUN_REPO_CLEANUP", "", "Periodically remove inactive repositories."))
-	wantPctFree       = env.Get("SRC_REPOS_DESIRED_PERCENT_FREE", "10", "Target percentage of free space on disk.")
-	janitorInterval   = env.Get("SRC_REPOS_JANITOR_INTERVAL", "1m", "Interval between cleanup runs")
+	reposDir                     = env.Get("SRC_REPOS_DIR", "/data/repos", "Root dir containing repos.")
+	wantPctFree                  = env.MustGetInt("SRC_REPOS_DESIRED_PERCENT_FREE", 10, "Target percentage of free space on disk.")
+	janitorInterval              = env.MustGetDuration("SRC_REPOS_JANITOR_INTERVAL", 1*time.Minute, "Interval between cleanup runs")
+	syncRepoStateInterval        = env.MustGetDuration("SRC_REPOS_SYNC_STATE_INTERVAL", 10*time.Minute, "Interval between state syncs")
+	syncRepoStateBatchSize       = env.MustGetInt("SRC_REPOS_SYNC_STATE_BATCH_SIZE", 500, "Number of upserts to perform per batch")
+	syncRepoStateUpsertPerSecond = env.MustGetInt("SRC_REPOS_SYNC_STATE_UPSERT_PER_SEC", 500, "The number of upserted rows allowed per second across all gitserver instances")
+	envHostname                  = env.Get("HOSTNAME", "", "Hostname override")
 )
 
 func main() {
+	ctx := context.Background()
+
 	env.Lock()
 	env.HandleHelpFlag()
 
@@ -58,30 +69,79 @@ func main() {
 		log.Fatalf("failed to create SRC_REPOS_DIR: %s", err)
 	}
 
-	wantPctFree2, err := parsePercent(wantPctFree)
+	wantPctFree2, err := getPercent(wantPctFree)
 	if err != nil {
-		log.Fatalf("parsing $SRC_REPOS_DESIRED_PERCENT_FREE: %v", err)
+		log.Fatalf("SRC_REPOS_DESIRED_PERCENT_FREE is out of range: %v", err)
 	}
 
-	repoStore, err := getRepoStore()
+	db, err := getDB()
 	if err != nil {
-		log.Fatalf("failed to initialize db repo store: %v", err)
+		log.Fatalf("failed to initialize database stores: %v", err)
+	}
+	repoStore := database.Repos(db)
+	externalServiceStore := database.ExternalServices(db)
+
+	err = keyring.Init(ctx)
+	if err != nil {
+		log.Fatalf("failed to initialise keyring: %s", err)
 	}
 
 	gitserver := server.Server{
-		ReposDir:                reposDir,
-		DeleteStaleRepositories: runRepoCleanup,
-		DesiredPercentFree:      wantPctFree2,
+		ReposDir:           reposDir,
+		DesiredPercentFree: wantPctFree2,
 		GetRemoteURLFunc: func(ctx context.Context, repo api.RepoName) (string, error) {
 			r, err := repoStore.GetByName(ctx, repo)
 			if err != nil {
 				return "", err
 			}
+
 			for _, info := range r.Sources {
-				return info.CloneURL, nil
+				// build the clone url using the external service config instead of using
+				// the source CloneURL field
+				svc, err := externalServiceStore.GetByID(ctx, info.ExternalServiceID())
+				if err != nil {
+					return "", err
+				}
+
+				return types.RepoCloneURL(svc.Kind, svc.Config, r)
 			}
 			return "", fmt.Errorf("no sources for %q", repo)
 		},
+		GetVCSSyncer: func(ctx context.Context, repo api.RepoName) (server.VCSSyncer, error) {
+			r, err := repoStore.GetByName(ctx, repo)
+			if err != nil {
+				return nil, errors.Wrap(err, "get repository")
+			}
+
+			switch r.ExternalRepo.ServiceType {
+			case extsvc.TypePerforce:
+				// Extract options from external service config
+				var c schema.PerforceConnection
+				for _, info := range r.Sources {
+					es, err := externalServiceStore.GetByID(ctx, info.ExternalServiceID())
+					if err != nil {
+						return nil, errors.Wrap(err, "get external service")
+					}
+
+					normalized, err := jsonc.Parse(es.Config)
+					if err != nil {
+						return nil, errors.Wrap(err, "normalize JSON")
+					}
+
+					if err = jsoniter.Unmarshal(normalized, &c); err != nil {
+						return nil, errors.Wrap(err, "unmarshal JSON")
+					}
+					break
+				}
+
+				return &server.PerforceDepotSyncer{
+					MaxChanges: int(c.MaxChanges),
+				}, nil
+			}
+			return &server.GitRepoSyncer{}, nil
+		},
+		Hostname: hostnameBestEffort(),
+		DB:       db,
 	}
 	gitserver.RegisterMetrics()
 
@@ -96,18 +156,12 @@ func main() {
 	// Create Handler now since it also initializes state
 	handler := ot.Middleware(gitserver.Handler())
 
-	go debugserver.Start()
-
-	janitorInterval2, err := time.ParseDuration(janitorInterval)
-	if err != nil {
-		log.Fatalf("parsing $SRC_REPOS_JANITOR_INTERVAL: %v", err)
-	}
-	go func() {
-		for {
-			gitserver.Janitor()
-			time.Sleep(janitorInterval2)
-		}
-	}()
+	// Ready immediately
+	ready := make(chan struct{})
+	close(ready)
+	go debugserver.NewServerRoutine(ready).Start()
+	go gitserver.Janitor(janitorInterval)
+	go gitserver.SyncRepoState(syncRepoStateInterval, syncRepoStateBatchSize, syncRepoStateUpsertPerSecond)
 
 	port := "3178"
 	host := ""
@@ -146,11 +200,15 @@ func main() {
 	gitserver.Stop()
 }
 
-func parsePercent(s string) (int, error) {
-	p, err := strconv.Atoi(s)
-	if err != nil {
-		return 0, errors.Wrap(err, "converting string to int")
+func hostnameBestEffort() string {
+	if envHostname != "" {
+		return envHostname
 	}
+	h, _ := os.Hostname()
+	return h
+}
+
+func getPercent(p int) (int, error) {
 	if p < 0 {
 		return 0, fmt.Errorf("negative value given for percentage: %d", p)
 	}
@@ -160,9 +218,9 @@ func parsePercent(s string) (int, error) {
 	return p, nil
 }
 
-// getRepoStore initializes a connection to the database and returns a
-// RepoStore.
-func getRepoStore() (*db.RepoStore, error) {
+// getStores initializes a connection to the database and returns RepoStore and
+// ExternalServiceStore.
+func getDB() (dbutil.DB, error) {
 	//
 	// START FLAILING
 
@@ -185,10 +243,5 @@ func getRepoStore() (*db.RepoStore, error) {
 		}
 	})
 
-	h, err := dbutil.NewDB(dsn, "gitserver")
-	if err != nil {
-		return nil, err
-	}
-
-	return db.NewRepoStoreWithDB(h), nil
+	return dbconn.New(dsn, "gitserver")
 }

@@ -1,6 +1,7 @@
 import * as React from 'react'
-import { displayRepoName, splitPath } from './RepoFileLink'
+
 import { Link } from './Link'
+import { displayRepoName, splitPath } from './RepoFileLink'
 
 interface Props {
     repoName: string
@@ -26,11 +27,11 @@ export const RepoLink: React.FunctionComponent<Props> = ({
 }) => {
     const [repoBase, repoName] = splitPath(displayRepoName(fullRepoName))
     const children = (
-        <>
+        <span className={className || ''}>
             {' '}
             {repoBase ? `${repoBase}/` : null}
             <span className={repoClassName}>{repoName}</span>
-        </>
+        </span>
     )
     if (to === null) {
         return children

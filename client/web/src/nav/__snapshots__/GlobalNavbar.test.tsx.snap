@@ -21,9 +21,28 @@ exports[`GlobalNavbar default 1`] = `
       authenticatedUser={null}
       caseSensitive={false}
       copyQueryButton={false}
+      defaultSearchContextSpec=""
+      enableCodeMonitoring={false}
       enableSmartQuery={false}
-      extensionsController={Object {}}
-      filtersInQuery={Object {}}
+      extensionsController={
+        Object {
+          "commandErrors": Observable {
+            "_isScalar": false,
+            "_subscribe": [Function],
+          },
+          "executeCommand": [Function],
+          "extHostAPI": Promise {},
+          "registerCommand": [Function],
+          "unsubscribe": [Function],
+        }
+      }
+      fetchAutoDefinedSearchContexts={
+        Observable {
+          "_isScalar": false,
+          "_subscribe": [Function],
+        }
+      }
+      fetchSearchContexts={[Function]}
       globbing={false}
       history={
         Object {
@@ -72,27 +91,31 @@ exports[`GlobalNavbar default 1`] = `
       }
       navbarSearchState={
         Object {
-          "cursorPosition": 0,
           "query": "q",
         }
       }
       onChange={[Function]}
       onThemePreferenceChange={[Function]}
+      parsedSearchQuery="r:golang/oauth2 test f:travis"
       patternType="literal"
       platformContext={Object {}}
+      routes={Array []}
+      selectedSearchContextSpec=""
       setCaseSensitivity={[Function]}
       setPatternType={[Function]}
+      setSelectedSearchContextSpec={[Function]}
       settingsCascade={
         Object {
           "final": null,
           "subjects": null,
         }
       }
-      showCampaigns={false}
+      showBatchChanges={false}
       showOnboardingTour={false}
+      showSearchContext={false}
+      showSearchContextManagement={false}
       telemetryService={Object {}}
       themePreference="light"
-      toggleSearchMode={[Function]}
     />
   </div>
 </div>

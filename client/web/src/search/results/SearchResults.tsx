@@ -1,54 +1,61 @@
+import { Remote } from 'comlink'
 import * as H from 'history'
 import { isEqual } from 'lodash'
 import * as React from 'react'
-import { concat, Observable, Subject, Subscription } from 'rxjs'
+import { concat, from, Observable, Subject, Subscription } from 'rxjs'
 import { catchError, distinctUntilChanged, filter, map, startWith, switchMap, tap } from 'rxjs/operators'
+
+import { wrapRemoteObservable } from '@sourcegraph/shared/src/api/client/api/common'
+import { FlatExtensionHostAPI } from '@sourcegraph/shared/src/api/contract'
+import { Contributions, Evaluated } from '@sourcegraph/shared/src/api/protocol'
+import { FetchFileParameters } from '@sourcegraph/shared/src/components/CodeExcerpt'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { SearchPatternType } from '@sourcegraph/shared/src/graphql-operations'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { isSettingsValid, SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { ErrorLike, isErrorLike, asError } from '@sourcegraph/shared/src/util/errors'
+import { buildSearchURLQuery } from '@sourcegraph/shared/src/util/url'
+
 import {
     parseSearchURLQuery,
     parseSearchURLPatternType,
     PatternTypeProps,
-    InteractiveSearchProps,
     CaseSensitivityProps,
     parseSearchURL,
     resolveVersionContext,
+    MutableVersionContextProps,
+    ParsedSearchQueryProps,
+    SearchContextProps,
 } from '..'
-import { Contributions, Evaluated } from '../../../../shared/src/api/protocol'
-import { FetchFileParameters } from '../../../../shared/src/components/CodeExcerpt'
-import { ExtensionsControllerProps } from '../../../../shared/src/extensions/controller'
-import * as GQL from '../../../../shared/src/graphql/schema'
-import { PlatformContextProps } from '../../../../shared/src/platform/context'
-import { isSettingsValid, SettingsCascadeProps } from '../../../../shared/src/settings/settings'
-import { TelemetryProps } from '../../../../shared/src/telemetry/telemetryService'
-import { ErrorLike, isErrorLike, asError } from '../../../../shared/src/util/errors'
+import { AuthenticatedUser } from '../../auth'
+import { CodeMonitoringProps } from '../../code-monitoring'
 import { PageTitle } from '../../components/PageTitle'
+import { DeployType } from '../../jscontext'
 import { Settings } from '../../schema/settings.schema'
-import { ThemeProps } from '../../../../shared/src/theme'
 import { eventLogger, EventLogger } from '../../tracking/eventLogger'
+import { shouldDisplayPerformanceWarning } from '../backend'
 import { isSearchResults, submitSearch, toggleSearchFilter, getSearchTypeFromQuery, QueryState } from '../helpers'
 import { queryTelemetryData } from '../queryTelemetry'
-import { SearchResultsFilterBars, DynamicSearchFilter } from './SearchResultsFilterBars'
+
+import { DynamicSearchFilter, SearchResultsFilterBars } from './SearchResultsFilterBars'
 import { SearchResultsList } from './SearchResultsList'
-import { buildSearchURLQuery } from '../../../../shared/src/util/url'
-import { VersionContextProps } from '../../../../shared/src/search/util'
-import { VersionContext } from '../../schema/site.schema'
-import { Remote } from 'comlink'
-import { FlatExtensionHostAPI } from '../../../../shared/src/api/contract'
-import { DeployType } from '../../jscontext'
-import { AuthenticatedUser } from '../../auth'
-import { SearchPatternType } from '../../../../shared/src/graphql-operations'
-import { shouldDisplayPerformanceWarning } from '../backend'
 import { VersionContextWarning } from './VersionContextWarning'
 
 export interface SearchResultsProps
-    extends ExtensionsControllerProps<'executeCommand' | 'extHostAPI' | 'services'>,
+    extends ExtensionsControllerProps<'executeCommand' | 'extHostAPI'>,
         PlatformContextProps<'forceUpdateTooltip' | 'settings'>,
         SettingsCascadeProps,
         TelemetryProps,
         ThemeProps,
+        Pick<ParsedSearchQueryProps, 'parsedSearchQuery'>,
         PatternTypeProps,
         CaseSensitivityProps,
-        InteractiveSearchProps,
-        VersionContextProps {
+        MutableVersionContextProps,
+        CodeMonitoringProps,
+        Pick<SearchContextProps, 'selectedSearchContextSpec'> {
     authenticatedUser: AuthenticatedUser | null
     location: H.Location
     history: H.History
@@ -64,9 +71,6 @@ export interface SearchResultsProps
     ) => Observable<GQL.ISearchResults | ErrorLike>
     isSourcegraphDotCom: boolean
     deployType: DeployType
-    setVersionContext: (versionContext: string | undefined) => void
-    availableVersionContexts: VersionContext[] | undefined
-    previousVersionContext: string | null
 }
 
 interface SearchResultsState {
@@ -91,7 +95,7 @@ interface SearchResultsState {
 }
 
 /** All values that are valid for the `type:` filter. `null` represents default code search. */
-export type SearchType = 'diff' | 'commit' | 'symbol' | 'repo' | 'path' | null
+export type SearchType = 'file' | 'repo' | 'path' | 'symbol' | 'diff' | 'commit' | null
 
 // The latest supported version of our search syntax. Users should never be able to determine the search version.
 // The version is set based on the release tag of the instance. Anything before 3.9.0 will not pass a version parameter,
@@ -123,7 +127,8 @@ export class SearchResults extends React.Component<SearchResultsProps, SearchRes
                     query,
                     SearchPatternType.regexp,
                     this.props.caseSensitive,
-                    this.props.versionContext
+                    this.props.versionContext,
+                    this.props.selectedSearchContextSpec
                 )
             this.props.history.replace(newLocation)
         }
@@ -134,7 +139,11 @@ export class SearchResults extends React.Component<SearchResultsProps, SearchRes
             this.componentUpdates
                 .pipe(
                     startWith(this.props),
-                    map(props => parseSearchURL(props.location.search)),
+                    map(props =>
+                        parseSearchURL(props.location.search, {
+                            appendCaseFilter: true,
+                        })
+                    ),
                     // Search when a new search query was specified in the URL
                     distinctUntilChanged((a, b) => isEqual(a, b)),
                     filter(
@@ -151,9 +160,6 @@ export class SearchResults extends React.Component<SearchResultsProps, SearchRes
                         const query_data = queryTelemetryData(query, caseSensitive)
                         this.props.telemetryService.log('SearchResultsQueried', {
                             code_search: { query_data },
-                            ...(this.props.splitSearchModes
-                                ? { mode: this.props.interactiveSearchMode ? 'interactive' : 'plain' }
-                                : {}),
                         })
                         if (query_data.query?.field_type && query_data.query.field_type.value_diff > 0) {
                             this.props.telemetryService.log('DiffSearchResultsQueried')
@@ -203,7 +209,12 @@ export class SearchResults extends React.Component<SearchResultsProps, SearchRes
                                                 this.props.setCaseSensitivity(caseSensitive)
                                             }
 
-                                            this.props.setVersionContext(versionContext)
+                                            this.props.setVersionContext(versionContext).catch(error => {
+                                                console.error(
+                                                    'Error sending initial versionContext to extensions',
+                                                    error
+                                                )
+                                            })
                                         },
                                         error => {
                                             this.props.telemetryService.log('SearchResultsFetchFailed', {
@@ -256,8 +267,8 @@ export class SearchResults extends React.Component<SearchResultsProps, SearchRes
         )
 
         this.subscriptions.add(
-            this.props.extensionsController.services.contribution
-                .getContributions()
+            from(this.props.extensionsController.extHostAPI)
+                .pipe(switchMap(extensionHostAPI => wrapRemoteObservable(extensionHostAPI.getContributions())))
                 .subscribe(contributions => this.setState({ contributions }))
         )
     }
@@ -302,22 +313,18 @@ export class SearchResults extends React.Component<SearchResultsProps, SearchRes
         return (
             <div className="test-search-results search-results d-flex flex-column w-100">
                 <PageTitle key="page-title" title={query} />
-                {!this.props.interactiveSearchMode && (
-                    <SearchResultsFilterBars
-                        navbarSearchQuery={this.props.navbarSearchQueryState.query}
-                        searchSucceeded={isSearchResults(this.state.resultsOrError)}
-                        resultsLimitHit={
-                            isSearchResults(this.state.resultsOrError) && this.state.resultsOrError.limitHit
-                        }
-                        genericFilters={filters}
-                        extensionFilters={extensionFilters}
-                        repoFilters={repoFilters}
-                        quickLinks={quickLinks}
-                        onFilterClick={this.onDynamicFilterClicked}
-                        onShowMoreResultsClick={this.showMoreResults}
-                        calculateShowMoreResultsCount={this.calculateCount}
-                    />
-                )}
+                <SearchResultsFilterBars
+                    navbarSearchQuery={this.props.navbarSearchQueryState.query}
+                    searchSucceeded={isSearchResults(this.state.resultsOrError)}
+                    resultsLimitHit={isSearchResults(this.state.resultsOrError) && this.state.resultsOrError.limitHit}
+                    genericFilters={filters}
+                    extensionFilters={extensionFilters}
+                    repoFilters={repoFilters}
+                    quickLinks={quickLinks}
+                    onFilterClick={this.onDynamicFilterClicked}
+                    onShowMoreResultsClick={this.showMoreResults}
+                    calculateShowMoreResultsCount={this.calculateCount}
+                />
                 {this.state.showVersionContextWarning && (
                     <VersionContextWarning
                         versionContext={this.props.versionContext}

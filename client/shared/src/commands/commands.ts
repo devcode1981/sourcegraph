@@ -1,8 +1,14 @@
-import { Position } from '@sourcegraph/extension-api-types'
+import { Remote } from 'comlink'
 import { concat, from, of, Subscription, Unsubscribable } from 'rxjs'
 import { first } from 'rxjs/operators'
-import { Services } from '../api/client/services'
+import * as sourcegraph from 'sourcegraph'
+
+import { Position } from '@sourcegraph/extension-api-types'
+
+import { wrapRemoteObservable } from '../api/client/api/common'
+import { CommandEntry } from '../api/client/mainthread-api'
 import { KeyPath, SettingsEdit, updateSettings } from '../api/client/services/settings'
+import { FlatExtensionHostAPI } from '../api/contract'
 import { ActionContributionClientCommandUpdateConfiguration, Evaluated } from '../api/protocol'
 import { PlatformContext } from '../platform/context'
 
@@ -12,13 +18,14 @@ import { PlatformContext } from '../platform/context'
  * documentation.
  */
 export function registerBuiltinClientCommands(
-    { commands: commandRegistry, textDocumentLocations }: Services,
-    context: Pick<PlatformContext, 'requestGraphQL' | 'telemetryService' | 'settings' | 'updateSettings'>
+    context: Pick<PlatformContext, 'requestGraphQL' | 'telemetryService' | 'settings' | 'updateSettings'>,
+    extensionHost: Remote<FlatExtensionHostAPI>,
+    registerCommand: (entryToRegister: CommandEntry) => sourcegraph.Unsubscribable
 ): Unsubscribable {
     const subscription = new Subscription()
 
     subscription.add(
-        commandRegistry.registerCommand({
+        registerCommand({
             command: 'open',
             run: (url: string) => {
                 // The `open` client command is usually implemented by ActionItem rendering the action with the
@@ -34,7 +41,7 @@ export function registerBuiltinClientCommands(
     )
 
     subscription.add(
-        commandRegistry.registerCommand({
+        registerCommand({
             command: 'openPanel',
             run: (viewID: string) => {
                 // As above for `open`, the `openPanel` client command is usually implemented by an HTML <a>
@@ -49,11 +56,11 @@ export function registerBuiltinClientCommands(
      * Executes the location provider and returns its results.
      */
     subscription.add(
-        commandRegistry.registerCommand({
+        registerCommand({
             command: 'executeLocationProvider',
             run: (id: string, uri: string, position: Position) =>
                 concat(
-                    textDocumentLocations.getLocations(id, { textDocument: { uri }, position }),
+                    wrapRemoteObservable(extensionHost.getLocations(id, { textDocument: { uri }, position })),
                     // Concat with [] to avoid undefined promise value when the getLocation observable completes
                     // without emitting. See https://github.com/ReactiveX/rxjs/issues/1736.
                     of([])
@@ -64,12 +71,10 @@ export function registerBuiltinClientCommands(
     )
 
     subscription.add(
-        commandRegistry.registerCommand({
+        registerCommand({
             command: 'updateConfiguration',
             run: (...anyArguments: any[]): Promise<void> => {
-                const args = anyArguments as Evaluated<
-                    ActionContributionClientCommandUpdateConfiguration
-                >['commandArguments']
+                const args = anyArguments as Evaluated<ActionContributionClientCommandUpdateConfiguration>['commandArguments']
                 return updateSettings(context, convertUpdateConfigurationCommandArguments(args))
             },
         })
@@ -80,7 +85,7 @@ export function registerBuiltinClientCommands(
      * with the privileges of the current user.
      */
     subscription.add(
-        commandRegistry.registerCommand({
+        registerCommand({
             command: 'queryGraphQL',
             run: (query: string, variables: { [name: string]: any }): Promise<any> =>
                 // 🚨 SECURITY: The request might contain private info (such as
@@ -102,7 +107,7 @@ export function registerBuiltinClientCommands(
      * Sends a telemetry event to the Sourcegraph instance with the correct anonymous user id.
      */
     subscription.add(
-        commandRegistry.registerCommand({
+        registerCommand({
             command: 'logTelemetryEvent',
             run: (eventName: string, eventProperties?: any): Promise<any> => {
                 if (context.telemetryService) {

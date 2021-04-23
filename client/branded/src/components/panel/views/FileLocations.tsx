@@ -1,6 +1,3 @@
-import { Location } from '@sourcegraph/extension-api-types'
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
-import { Badged } from 'sourcegraph'
 import * as H from 'history'
 import { upperFirst } from 'lodash'
 import AlertCircleIcon from 'mdi-react/AlertCircleIcon'
@@ -8,14 +5,18 @@ import MapSearchIcon from 'mdi-react/MapSearchIcon'
 import * as React from 'react'
 import { Observable, Subject, Subscription } from 'rxjs'
 import { catchError, distinctUntilChanged, map, startWith, switchMap } from 'rxjs/operators'
-import { FetchFileParameters } from '../../../../../shared/src/components/CodeExcerpt'
-import { FileLineMatch, FileMatch, LineMatch } from '../../../../../shared/src/components/FileMatch'
-import { VirtualList } from '../../../../../shared/src/components/VirtualList'
-import { SettingsCascadeProps } from '../../../../../shared/src/settings/settings'
-import { asError, ErrorLike, isErrorLike } from '../../../../../shared/src/util/errors'
-import { property, isDefined } from '../../../../../shared/src/util/types'
-import { parseRepoURI, toPrettyBlobURL, toRepoURL } from '../../../../../shared/src/util/url'
-import { VersionContextProps } from '../../../../../shared/src/search/util'
+import { Badged } from 'sourcegraph'
+
+import { Location } from '@sourcegraph/extension-api-types'
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { FetchFileParameters } from '@sourcegraph/shared/src/components/CodeExcerpt'
+import { FileLineMatch, FileMatch, LineMatch } from '@sourcegraph/shared/src/components/FileMatch'
+import { VirtualList } from '@sourcegraph/shared/src/components/VirtualList'
+import { VersionContextProps } from '@sourcegraph/shared/src/search/util'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { asError, ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { property, isDefined } from '@sourcegraph/shared/src/util/types'
+import { parseRepoURI, toPrettyBlobURL, toRepoURL } from '@sourcegraph/shared/src/util/url'
 
 export const FileLocationsError: React.FunctionComponent<{ error: ErrorLike }> = ({ error }) => (
     <div className="file-locations__error alert alert-danger m-2">
@@ -26,6 +27,12 @@ export const FileLocationsError: React.FunctionComponent<{ error: ErrorLike }> =
 export const FileLocationsNotFound: React.FunctionComponent = () => (
     <div className="file-locations__not-found m-2">
         <MapSearchIcon className="icon-inline" /> No locations found
+    </div>
+)
+
+export const FileLocationsNoGroupSelected: React.FunctionComponent = () => (
+    <div className="file-locations__no-group-selected m-2">
+        <MapSearchIcon className="icon-inline" /> No locations found in the current repository
     </div>
 )
 
@@ -47,6 +54,9 @@ interface Props extends SettingsCascadeProps, VersionContextProps {
     isLightTheme: boolean
 
     fetchHighlightedFileLineRanges: (parameters: FetchFileParameters, force?: boolean) => Observable<string[][]>
+
+    /** Whether or not there are other groups in the parent container with results. */
+    parentContainerIsEmpty: boolean
 }
 
 const LOADING = 'loading' as const
@@ -59,6 +69,11 @@ interface State {
     locationsOrError: typeof LOADING | Location[] | null | ErrorLike
 
     itemsToShow: number
+}
+
+interface OrderedURI {
+    uri: string
+    repo: string
 }
 
 /**
@@ -111,7 +126,7 @@ export class FileLocations extends React.PureComponent<Props, State> {
             return <LoadingSpinner className="icon-inline m-1" />
         }
         if (this.state.locationsOrError === null || this.state.locationsOrError.length === 0) {
-            return <FileLocationsNotFound />
+            return this.props.parentContainerIsEmpty ? <FileLocationsNotFound /> : <FileLocationsNoGroupSelected />
         }
 
         // Locations by fully qualified URI, like git://github.com/gorilla/mux?revision#mux.go
@@ -134,23 +149,13 @@ export class FileLocations extends React.PureComponent<Props, State> {
 
         return (
             <div className={`file-locations ${this.props.className || ''}`}>
-                <VirtualList
+                <VirtualList<OrderedURI, { locationsByURI: Map<string, Location[]> }>
                     itemsToShow={this.state.itemsToShow}
                     onShowMoreItems={this.onShowMoreItems}
-                    items={orderedURIs.map(({ uri, repo }, index) => (
-                        <FileMatch
-                            key={index}
-                            location={this.props.location}
-                            expanded={true}
-                            result={referencesToFileLineMatch(uri, locationsByURI.get(uri)!)}
-                            icon={this.props.icon}
-                            onSelect={this.onSelect}
-                            showAllMatches={true}
-                            isLightTheme={this.props.isLightTheme}
-                            fetchHighlightedFileLineRanges={this.props.fetchHighlightedFileLineRanges}
-                            settingsCascade={this.props.settingsCascade}
-                        />
-                    ))}
+                    items={orderedURIs}
+                    renderItem={this.renderFileMatch}
+                    itemProps={{ locationsByURI }}
+                    itemKey={this.itemKey}
                 />
             </div>
         )
@@ -165,6 +170,25 @@ export class FileLocations extends React.PureComponent<Props, State> {
             this.props.onSelect()
         }
     }
+
+    private itemKey = (item: OrderedURI): string => item.uri
+
+    private renderFileMatch = (
+        { uri }: OrderedURI,
+        { locationsByURI }: { locationsByURI: Map<string, Location[]> }
+    ): JSX.Element => (
+        <FileMatch
+            location={this.props.location}
+            expanded={true}
+            result={referencesToFileLineMatch(uri, locationsByURI.get(uri)!)}
+            icon={this.props.icon}
+            onSelect={this.onSelect}
+            showAllMatches={true}
+            isLightTheme={this.props.isLightTheme}
+            fetchHighlightedFileLineRanges={this.props.fetchHighlightedFileLineRanges}
+            settingsCascade={this.props.settingsCascade}
+        />
+    )
 }
 
 function referencesToFileLineMatch(uri: string, references: Badged<Location>[]): FileLineMatch {
@@ -197,7 +221,7 @@ function referencesToFileLineMatch(uri: string, references: Badged<Location>[]):
                 offsetAndLengths: [
                     [reference.range.start.character, reference.range.end.character - reference.range.start.character],
                 ],
-                badge: reference.badge,
+                aggregableBadges: reference.aggregableBadges,
             })
         ),
     }

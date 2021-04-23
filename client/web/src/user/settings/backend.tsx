@@ -1,10 +1,11 @@
 import { Observable } from 'rxjs'
 import { map } from 'rxjs/operators'
-import { gql, dataOrThrowErrors } from '../../../../shared/src/graphql/graphql'
-import { createAggregateError } from '../../../../shared/src/util/errors'
+
+import { UserEvent, EventSource, Scalars } from '@sourcegraph/shared/src/graphql-operations'
+import { gql, dataOrThrowErrors } from '@sourcegraph/shared/src/graphql/graphql'
+import { createAggregateError } from '@sourcegraph/shared/src/util/errors'
+
 import { requestGraphQL } from '../../backend/graphql'
-import { eventLogger } from '../../tracking/eventLogger'
-import { UserEvent, EventSource, Scalars } from '../../../../shared/src/graphql-operations'
 import {
     LogEventResult,
     LogEventVariables,
@@ -14,7 +15,10 @@ import {
     SetUserEmailVerifiedVariables,
     UpdatePasswordResult,
     UpdatePasswordVariables,
+    CreatePasswordResult,
+    CreatePasswordVariables,
 } from '../../graphql-operations'
+import { eventLogger } from '../../tracking/eventLogger'
 
 export function updatePassword(args: UpdatePasswordVariables): Observable<void> {
     return requestGraphQL<UpdatePasswordResult, UpdatePasswordVariables>(
@@ -33,6 +37,27 @@ export function updatePassword(args: UpdatePasswordVariables): Observable<void> 
                 throw createAggregateError(errors)
             }
             eventLogger.log('PasswordUpdated')
+        })
+    )
+}
+
+export function createPassword(args: CreatePasswordVariables): Observable<void> {
+    return requestGraphQL<CreatePasswordResult, CreatePasswordVariables>(
+        gql`
+            mutation CreatePassword($newPassword: String!) {
+                createPassword(newPassword: $newPassword) {
+                    alwaysNil
+                }
+            }
+        `,
+        args
+    ).pipe(
+        map(({ data, errors }) => {
+            if (!data || !data.createPassword) {
+                eventLogger.log('CreatePasswordFailed')
+                throw createAggregateError(errors)
+            }
+            eventLogger.log('PasswordCreated')
         })
     )
 }
@@ -99,7 +124,8 @@ export function logUserEvent(event: UserEvent): void {
  * Log a raw user action (used to allow site admins on a Sourcegraph instance
  * to see a count of unique users on a daily, weekly, and monthly basis).
  *
- * Not used at all for public/sourcegraph.com usage.
+ * When invoked on a non-Sourcegraph.com instance, this data is stored in the
+ * instance's database, and not sent to Sourcegraph.com.
  */
 export function logEvent(event: string, eventProperties?: unknown): void {
     requestGraphQL<LogEventResult, LogEventVariables>(

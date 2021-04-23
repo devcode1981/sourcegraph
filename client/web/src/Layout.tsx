@@ -1,16 +1,26 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
-import React, { Suspense, useCallback } from 'react'
+import { Remote } from 'comlink'
+import React, { Suspense, useCallback, useEffect, useMemo } from 'react'
 import { Redirect, Route, RouteComponentProps, Switch, matchPath } from 'react-router'
 import { Observable } from 'rxjs'
-import { ActivationProps } from '../../shared/src/components/activation/Activation'
-import { FetchFileParameters } from '../../shared/src/components/CodeExcerpt'
-import { ExtensionsControllerProps } from '../../shared/src/extensions/controller'
-import * as GQL from '../../shared/src/graphql/schema'
-import { ResizablePanel } from '../../branded/src/components/panel/Panel'
-import { PlatformContextProps } from '../../shared/src/platform/context'
-import { SettingsCascadeProps } from '../../shared/src/settings/settings'
-import { ErrorLike } from '../../shared/src/util/errors'
-import { parseHash } from '../../shared/src/util/url'
+
+import { ResizablePanel } from '@sourcegraph/branded/src/components/panel/Panel'
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { FlatExtensionHostAPI } from '@sourcegraph/shared/src/api/contract'
+import { ActivationProps } from '@sourcegraph/shared/src/components/activation/Activation'
+import { FetchFileParameters } from '@sourcegraph/shared/src/components/CodeExcerpt'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { ErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { parseHash } from '@sourcegraph/shared/src/util/url'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
+
+import { AuthenticatedUser, authRequired as authRequiredObservable } from './auth'
+import { CodeMonitoringProps } from './code-monitoring'
+import { useBreadcrumbs } from './components/Breadcrumbs'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { useScrollToLocationHash } from './components/useScrollToLocationHash'
 import { GlobalContributions } from './contributions'
@@ -20,52 +30,47 @@ import { ExtensionsAreaRoute } from './extensions/ExtensionsArea'
 import { ExtensionsAreaHeaderActionButton } from './extensions/ExtensionsAreaHeader'
 import { GlobalAlerts } from './global/GlobalAlerts'
 import { GlobalDebug } from './global/GlobalDebug'
+import { SearchPatternType } from './graphql-operations'
+import { KeyboardShortcutsProps, KEYBOARD_SHORTCUT_SHOW_HELP } from './keyboardShortcuts/keyboardShortcuts'
 import { KeyboardShortcutsHelp } from './keyboardShortcuts/KeyboardShortcutsHelp'
+import { SurveyToast } from './marketing/SurveyToast'
 import { GlobalNavbar } from './nav/GlobalNavbar'
+import { useExtensionAlertAnimation } from './nav/UserNavItem'
 import { OrgAreaRoute } from './org/area/OrgArea'
 import { OrgAreaHeaderNavItem } from './org/area/OrgHeader'
 import { fetchHighlightedFileLineRanges } from './repo/backend'
 import { RepoContainerRoute } from './repo/RepoContainer'
 import { RepoHeaderActionButton } from './repo/RepoHeader'
 import { RepoRevisionContainerRoute } from './repo/RepoRevisionContainer'
+import { RepoSettingsAreaRoute } from './repo/settings/RepoSettingsArea'
+import { RepoSettingsSideBarGroup } from './repo/settings/RepoSettingsSidebar'
 import { LayoutRouteProps } from './routes'
+import { Settings } from './schema/settings.schema'
 import {
     parseSearchURLQuery,
     PatternTypeProps,
-    InteractiveSearchProps,
     CaseSensitivityProps,
     CopyQueryButtonProps,
     RepogroupHomepageProps,
     OnboardingTourProps,
     HomePanelsProps,
     SearchStreamingProps,
+    ParsedSearchQueryProps,
+    MutableVersionContextProps,
+    parseSearchURL,
+    SearchContextProps,
+    getGlobalSearchContextFilter,
 } from './search'
+import { QueryState } from './search/helpers'
 import { SiteAdminAreaRoute } from './site-admin/SiteAdminArea'
 import { SiteAdminSideBarGroups } from './site-admin/SiteAdminSidebar'
+import { ThemePreferenceProps } from './theme'
 import { UserAreaRoute } from './user/area/UserArea'
 import { UserAreaHeaderNavItem } from './user/area/UserAreaHeader'
 import { UserSettingsAreaRoute } from './user/settings/UserSettingsArea'
 import { UserSettingsSidebarItems } from './user/settings/UserSettingsSidebar'
+import { UserRepositoriesUpdateProps } from './util'
 import { parseBrowserRepoURL } from './util/url'
-import { SurveyToast } from './marketing/SurveyToast'
-import { ThemeProps } from '../../shared/src/theme'
-import { ThemePreferenceProps } from './theme'
-import { KeyboardShortcutsProps, KEYBOARD_SHORTCUT_SHOW_HELP } from './keyboardShortcuts/keyboardShortcuts'
-import { QueryState } from './search/helpers'
-import { RepoSettingsAreaRoute } from './repo/settings/RepoSettingsArea'
-import { VersionContextProps } from '../../shared/src/search/util'
-import { VersionContext } from './schema/site.schema'
-import { RepoSettingsSideBarGroup } from './repo/settings/RepoSettingsSidebar'
-import { Settings } from './schema/settings.schema'
-import { Remote } from 'comlink'
-import { FlatExtensionHostAPI } from '../../shared/src/api/contract'
-import { useBreadcrumbs } from './components/Breadcrumbs'
-import { AuthenticatedUser, authRequired as authRequiredObservable } from './auth'
-import { SearchPatternType } from './graphql-operations'
-import { TelemetryProps } from '../../shared/src/telemetry/telemetryService'
-import { useObservable } from '../../shared/src/util/useObservable'
-import { useExtensionAlertAnimation } from './nav/UserNavItem'
-import { CodeMonitoringProps } from './enterprise/code-monitoring'
 
 export interface LayoutProps
     extends RouteComponentProps<{}>,
@@ -77,16 +82,19 @@ export interface LayoutProps
         TelemetryProps,
         ThemePreferenceProps,
         ActivationProps,
+        ParsedSearchQueryProps,
         PatternTypeProps,
         CaseSensitivityProps,
-        InteractiveSearchProps,
         CopyQueryButtonProps,
-        VersionContextProps,
+        MutableVersionContextProps,
         RepogroupHomepageProps,
         OnboardingTourProps,
+        SearchContextProps,
         HomePanelsProps,
         SearchStreamingProps,
-        CodeMonitoringProps {
+        CodeMonitoringProps,
+        SearchContextProps,
+        UserRepositoriesUpdateProps {
     extensionAreaRoutes: readonly ExtensionAreaRoute[]
     extensionAreaHeaderNavItems: readonly ExtensionAreaHeaderNavItem[]
     extensionsAreaRoutes: readonly ExtensionsAreaRoute[]
@@ -126,15 +134,13 @@ export interface LayoutProps
         versionContext: string | undefined,
         extensionHostPromise: Promise<Remote<FlatExtensionHostAPI>>
     ) => Observable<GQL.ISearchResults | ErrorLike>
-    setVersionContext: (versionContext: string | undefined) => void
-    availableVersionContexts: VersionContext[] | undefined
-    previousVersionContext: string | null
+
     globbing: boolean
     showMultilineSearchConsole: boolean
     showQueryBuilder: boolean
     enableSmartQuery: boolean
     isSourcegraphDotCom: boolean
-    showCampaigns: boolean
+    showBatchChanges: boolean
     fetchSavedSearches: () => Observable<GQL.ISavedSearch[]>
     children?: never
 }
@@ -144,6 +150,72 @@ export const Layout: React.FunctionComponent<LayoutProps> = props => {
     const isSearchRelatedPage = (routeMatch === '/:repoRevAndRest+' || routeMatch?.startsWith('/search')) ?? false
     const minimalNavLinks = routeMatch === '/cncf'
     const isSearchHomepage = props.location.pathname === '/search' && !parseSearchURLQuery(props.location.search)
+
+    // Update parsedSearchQuery, patternType, caseSensitivity, versionContext, and selectedSearchContextSpec based on current URL
+    const {
+        history,
+        parsedSearchQuery: currentQuery,
+        patternType: currentPatternType,
+        caseSensitive: currentCaseSensitive,
+        versionContext: currentVersionContext,
+        selectedSearchContextSpec,
+        location,
+        setParsedSearchQuery,
+        setPatternType,
+        setCaseSensitivity,
+        setVersionContext,
+        setSelectedSearchContextSpec,
+    } = props
+
+    const { query = '', patternType, caseSensitive, versionContext } = useMemo(() => parseSearchURL(location.search), [
+        location.search,
+    ])
+
+    const searchContextSpec = useMemo(() => getGlobalSearchContextFilter(query)?.spec, [query])
+
+    useEffect(() => {
+        if (query !== currentQuery) {
+            setParsedSearchQuery(query)
+        }
+
+        // Only override filters from URL if there is a search query
+        if (query) {
+            if (patternType && patternType !== currentPatternType) {
+                setPatternType(patternType)
+            }
+
+            if (caseSensitive !== currentCaseSensitive) {
+                setCaseSensitivity(caseSensitive)
+            }
+
+            if (versionContext !== currentVersionContext) {
+                setVersionContext(versionContext).catch(error => {
+                    console.error('Error sending version context to extensions', error)
+                })
+            }
+
+            if (searchContextSpec && searchContextSpec !== selectedSearchContextSpec) {
+                setSelectedSearchContextSpec(searchContextSpec)
+            }
+        }
+    }, [
+        history,
+        caseSensitive,
+        currentCaseSensitive,
+        currentPatternType,
+        currentQuery,
+        currentVersionContext,
+        selectedSearchContextSpec,
+        patternType,
+        query,
+        setCaseSensitivity,
+        setParsedSearchQuery,
+        setPatternType,
+        setVersionContext,
+        versionContext,
+        setSelectedSearchContextSpec,
+        searchContextSpec,
+    ])
 
     // Hack! Hardcode these routes into cmd/frontend/internal/app/ui/router.go
     const repogroupPages = [
@@ -159,12 +231,17 @@ export const Layout: React.FunctionComponent<LayoutProps> = props => {
 
     // TODO add a component layer as the parent of the Layout component rendering "top-level" routes that do not render the navbar,
     // so that Layout can always render the navbar.
-    const needsSiteInit = window.context.needsSiteInit
+    const needsSiteInit = window.context?.needsSiteInit
     const isSiteInit = props.location.pathname === '/site-admin/init'
     const isSignInOrUp =
         props.location.pathname === '/sign-in' ||
         props.location.pathname === '/sign-up' ||
         props.location.pathname === '/password-reset'
+
+    // TODO Change this behavior when we have global focus management system
+    // Need to know this for disable autofocus on nav search input
+    // and preserve autofocus for first textarea at survey page
+    const isSurveyPage = routeMatch === '/survey/:score?'
 
     const authRequired = useObservable(authRequiredObservable)
 
@@ -222,12 +299,19 @@ export const Layout: React.FunctionComponent<LayoutProps> = props => {
                     }
                     hideNavLinks={false}
                     minimalNavLinks={minimalNavLinks}
+                    isSearchAutoFocusRequired={!isSurveyPage}
                     isExtensionAlertAnimating={isExtensionAlertAnimating}
                 />
             )}
             {needsSiteInit && !isSiteInit && <Redirect to="/site-admin/init" />}
             <ErrorBoundary location={props.location}>
-                <Suspense fallback={<LoadingSpinner className="icon-inline m-2" />}>
+                <Suspense
+                    fallback={
+                        <div className="flex flex-1">
+                            <LoadingSpinner className="icon-inline m-2" />
+                        </div>
+                    }
+                >
                     <Switch>
                         {/* eslint-disable react/jsx-no-bind */}
                         {props.routes.map(

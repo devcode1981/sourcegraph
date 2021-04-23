@@ -15,8 +15,8 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/sourcegraph/sourcegraph/internal/api"
-	idb "github.com/sourcegraph/sourcegraph/internal/db"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbtesting"
+	"github.com/sourcegraph/sourcegraph/internal/conf"
+	"github.com/sourcegraph/sourcegraph/internal/database"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc/awscodecommit"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc/bitbucketserver"
@@ -25,12 +25,13 @@ import (
 	"github.com/sourcegraph/sourcegraph/internal/extsvc/gitolite"
 	"github.com/sourcegraph/sourcegraph/internal/ratelimit"
 	"github.com/sourcegraph/sourcegraph/internal/repos"
+	"github.com/sourcegraph/sourcegraph/internal/timeutil"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 	"github.com/sourcegraph/sourcegraph/schema"
 )
 
 func testStoreUpsertRepos(t *testing.T, store *repos.Store) func(*testing.T) {
-	clock := dbtesting.NewFakeClock(time.Now(), 0)
+	clock := timeutil.NewFakeClock(time.Now(), 0)
 	now := clock.Now()
 
 	return func(t *testing.T) {
@@ -129,6 +130,7 @@ func testStoreUpsertRepos(t *testing.T, store *repos.Store) func(*testing.T) {
 				ServiceID:   "https://git-host.com/",
 				ServiceType: extsvc.TypeOther,
 			},
+			Metadata: &types.OtherRepoMetadata{},
 			Sources: map[string]*types.SourceInfo{
 				servicesPerKind[extsvc.KindOther].URN(): {
 					ID:       servicesPerKind[extsvc.KindOther].URN(),
@@ -188,7 +190,7 @@ func testStoreUpsertRepos(t *testing.T, store *repos.Store) func(*testing.T) {
 				t.Fatalf("UpsertRepos didn't assign an ID to all repos: %v", noID.Names())
 			}
 
-			have, err := tx.RepoStore.List(ctx, idb.ReposListOptions{
+			have, err := tx.RepoStore.List(ctx, database.ReposListOptions{
 				ServiceTypes: kinds,
 			})
 			if err != nil {
@@ -215,14 +217,14 @@ func testStoreUpsertRepos(t *testing.T, store *repos.Store) func(*testing.T) {
 				t.Errorf("UpsertRepos error: %s", err)
 			} else if err = tx.UpsertSources(ctx, want.Clone().Sources(), nil, nil); err != nil {
 				t.Fatalf("UpsertSources error: %s", err)
-			} else if have, err = tx.RepoStore.List(ctx, idb.ReposListOptions{}); err != nil {
+			} else if have, err = tx.RepoStore.List(ctx, database.ReposListOptions{}); err != nil {
 				t.Errorf("ListRepos error: %s", err)
 			} else if diff := cmp.Diff(have, []*types.Repo(want), cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("ListRepos:\n%s", diff)
 			}
 
 			deleted := want.Clone().With(types.Opt.RepoDeletedAt(now))
-			args := idb.ReposListOptions{}
+			args := database.ReposListOptions{}
 
 			if err = tx.UpsertRepos(ctx, deleted...); err != nil {
 				t.Fatalf("UpsertRepos error: %s", err)
@@ -237,7 +239,7 @@ func testStoreUpsertRepos(t *testing.T, store *repos.Store) func(*testing.T) {
 				t.Errorf("UpsertRepos error: %s", err)
 			} else if err = tx.UpsertSources(ctx, want.Clone().Sources(), nil, nil); err != nil {
 				t.Fatalf("UpsertSources error: %s", err)
-			} else if have, err = tx.RepoStore.List(ctx, idb.ReposListOptions{}); err != nil {
+			} else if have, err = tx.RepoStore.List(ctx, database.ReposListOptions{}); err != nil {
 				t.Errorf("ListRepos error: %s", err)
 			} else if diff := cmp.Diff(have, []*types.Repo(want), cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("ListRepos:\n%s", diff)
@@ -255,7 +257,7 @@ func testStoreUpsertRepos(t *testing.T, store *repos.Store) func(*testing.T) {
 				t.Fatalf("UpsertRepos want error: %s", err)
 			} else if err = tx.UpsertSources(ctx, want.Sources(), nil, nil); err != nil {
 				t.Fatalf("UpsertSources error: %s", err)
-			} else if have, err = tx.RepoStore.List(ctx, idb.ReposListOptions{}); err != nil {
+			} else if have, err = tx.RepoStore.List(ctx, database.ReposListOptions{}); err != nil {
 				t.Errorf("ListRepos error: %s", err)
 			} else if diff := cmp.Diff(have, []*types.Repo(want), cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("ListRepos:\n%s", diff)
@@ -280,7 +282,7 @@ func testStoreUpsertRepos(t *testing.T, store *repos.Store) func(*testing.T) {
 				t.Fatalf("UpsertRepos didn't assign an ID to all repos: %v", noID.Names())
 			}
 
-			have, err := tx.RepoStore.List(ctx, idb.ReposListOptions{
+			have, err := tx.RepoStore.List(ctx, database.ReposListOptions{
 				ServiceTypes: kinds,
 			})
 			if err != nil {
@@ -292,7 +294,7 @@ func testStoreUpsertRepos(t *testing.T, store *repos.Store) func(*testing.T) {
 			}
 
 			allDeleted := all.Clone().With(types.Opt.RepoDeletedAt(now))
-			args := idb.ReposListOptions{}
+			args := database.ReposListOptions{}
 
 			if err = tx.UpsertRepos(ctx, allDeleted...); err != nil {
 				t.Fatalf("UpsertRepos error: %s", err)
@@ -315,53 +317,18 @@ func testStoreUpsertRepos(t *testing.T, store *repos.Store) func(*testing.T) {
 				t.Fatalf("UpsertSources error: %s", err)
 			}
 
-			if have, err = tx.RepoStore.List(ctx, idb.ReposListOptions{}); err != nil {
+			if have, err = tx.RepoStore.List(ctx, database.ReposListOptions{}); err != nil {
 				t.Fatalf("ListRepos error: %s", err)
 			}
 			if diff := cmp.Diff(have, []*types.Repo(want), cmpopts.EquateEmpty()); diff != "" {
 				t.Fatalf("ListRepos:\n%s", diff)
 			}
 		}))
-
-		t.Run("it shouldn't modify the cloned column", transact(ctx, store, func(t testing.TB, tx *repos.Store) {
-			// UpsertRepos shouldn't set the cloned column to true
-			r := mkRepos(1, repositories...)[0]
-			r.Cloned = true
-			if err := tx.UpsertRepos(ctx, r); err != nil {
-				t.Fatalf("UpsertRepos error: %s", err)
-			}
-
-			count, err := tx.CountNotClonedRepos(ctx)
-			if err != nil {
-				t.Fatalf("CountNotClonedRepos error: %s", err)
-			}
-			if count != 1 {
-				t.Fatalf("Wrong number of not cloned repos: %d", count)
-			}
-
-			// UpsertRepos shouldn't set the cloned column to false either
-			if err := tx.SetClonedRepos(ctx, string(r.Name)); err != nil {
-				t.Fatalf("SetClonedRepos error: %s", err)
-			}
-			r = r.Clone()
-			r.Cloned = false
-			if err := tx.UpsertRepos(ctx, r); err != nil {
-				t.Fatalf("UpsertRepos error: %s", err)
-			}
-
-			count, err = tx.CountNotClonedRepos(ctx)
-			if err != nil {
-				t.Fatalf("CountNotClonedRepos error: %s", err)
-			}
-			if count != 0 {
-				t.Fatalf("Wrong number of not cloned repos: %d", count)
-			}
-		}))
 	}
 }
 
 func testStoreUpsertSources(t *testing.T, store *repos.Store) func(*testing.T) {
-	clock := dbtesting.NewFakeClock(time.Now(), 0)
+	clock := timeutil.NewFakeClock(time.Now(), 0)
 	now := clock.Now()
 
 	servicesPerKind := createExternalServices(t, store)
@@ -446,7 +413,7 @@ func testStoreUpsertSources(t *testing.T, store *repos.Store) func(*testing.T) {
 			// it should not contain any source
 			want[0].Sources = nil
 
-			got, err := tx.RepoStore.List(ctx, idb.ReposListOptions{})
+			got, err := tx.RepoStore.List(ctx, database.ReposListOptions{})
 			if err != nil {
 				t.Fatalf("ListRepos error: %s", err)
 			}
@@ -471,8 +438,7 @@ func testStoreUpsertSources(t *testing.T, store *repos.Store) func(*testing.T) {
 
 			// delete an external service
 			svc := servicesPerKind[extsvc.KindGitHub]
-			svc.DeletedAt = now
-			if err := tx.ExternalServiceStore.Upsert(ctx, svc); err != nil {
+			if err := tx.ExternalServiceStore.Delete(ctx, svc.ID); err != nil {
 				t.Fatalf("Upsert externalServices error: %s", err)
 			}
 
@@ -495,7 +461,7 @@ func testStoreUpsertSources(t *testing.T, store *repos.Store) func(*testing.T) {
 				}
 			})
 
-			got, err := tx.RepoStore.List(ctx, idb.ReposListOptions{})
+			got, err := tx.RepoStore.List(ctx, database.ReposListOptions{})
 			if err != nil {
 				t.Fatalf("ListRepos error: %s", err)
 			}
@@ -518,7 +484,7 @@ func testStoreUpsertSources(t *testing.T, store *repos.Store) func(*testing.T) {
 				t.Fatalf("UpsertSources error: %s", err)
 			}
 
-			have, err := tx.RepoStore.List(ctx, idb.ReposListOptions{})
+			have, err := tx.RepoStore.List(ctx, database.ReposListOptions{})
 			if err != nil {
 				t.Fatalf("ListRepos error: %s", err)
 			}
@@ -547,7 +513,7 @@ func testStoreUpsertSources(t *testing.T, store *repos.Store) func(*testing.T) {
 			// by the time it become orphaned.
 			want = append(want[:1], want[2:]...)
 
-			have, err = tx.RepoStore.List(ctx, idb.ReposListOptions{})
+			have, err = tx.RepoStore.List(ctx, database.ReposListOptions{})
 			if err != nil {
 				t.Fatalf("ListRepos error: %s", err)
 			}
@@ -559,10 +525,6 @@ func testStoreUpsertSources(t *testing.T, store *repos.Store) func(*testing.T) {
 	}
 }
 
-func isCloned(r *types.Repo) bool {
-	return r.Cloned
-}
-
 func testStoreSetClonedRepos(t *testing.T, store *repos.Store) func(*testing.T) {
 	servicesPerKind := createExternalServices(t, store)
 
@@ -570,9 +532,8 @@ func testStoreSetClonedRepos(t *testing.T, store *repos.Store) func(*testing.T) 
 		var repositories types.Repos
 		for i := 0; i < 3; i++ {
 			repositories = append(repositories, &types.Repo{
-				Name:   api.RepoName(fmt.Sprintf("github.com/%d/%d", i, i)),
-				URI:    fmt.Sprintf("github.com/%d/%d", i, i),
-				Cloned: false,
+				Name: api.RepoName(fmt.Sprintf("github.com/%d/%d", i, i)),
+				URI:  fmt.Sprintf("github.com/%d/%d", i, i),
 				ExternalRepo: api.ExternalRepoSpec{
 					ID:          strconv.Itoa(i),
 					ServiceType: extsvc.TypeGitHub,
@@ -591,12 +552,12 @@ func testStoreSetClonedRepos(t *testing.T, store *repos.Store) func(*testing.T) 
 		check := func(t testing.TB, ctx context.Context, tx *repos.Store, wantNames []string) {
 			t.Helper()
 
-			res, err := tx.RepoStore.List(ctx, idb.ReposListOptions{})
+			res, err := tx.RepoStore.List(ctx, database.ReposListOptions{OnlyCloned: true})
 			if err != nil {
 				t.Fatalf("ListRepos error: %s", err)
 			}
 
-			cloned := types.Repos(res).Filter(isCloned).Names()
+			cloned := types.Repos(res).Names()
 			sort.Strings(cloned)
 
 			if got, want := cloned, wantNames; !cmp.Equal(got, want) {
@@ -684,9 +645,8 @@ func testStoreCountNotClonedRepos(t *testing.T, store *repos.Store) func(*testin
 		var repositories types.Repos
 		for i := 0; i < 3; i++ {
 			repositories = append(repositories, &types.Repo{
-				Name:   api.RepoName(fmt.Sprintf("github.com/%d/%d", i, i)),
-				URI:    fmt.Sprintf("github.com/%d/%d", i, i),
-				Cloned: false,
+				Name: api.RepoName(fmt.Sprintf("github.com/%d/%d", i, i)),
+				URI:  fmt.Sprintf("github.com/%d/%d", i, i),
 				ExternalRepo: api.ExternalRepoSpec{
 					ID:          strconv.Itoa(i),
 					ServiceType: extsvc.TypeGitHub,
@@ -705,11 +665,11 @@ func testStoreCountNotClonedRepos(t *testing.T, store *repos.Store) func(*testin
 		ctx := context.Background()
 
 		t.Run("no cloned repos", func(t *testing.T) {
-			count, err := store.CountNotClonedRepos(ctx)
+			count, err := store.RepoStore.Count(ctx, database.ReposListOptions{NoCloned: true})
 			if err != nil {
 				t.Fatalf("CountNotClonedRepos error: %s", err)
 			}
-			if diff := cmp.Diff(count, uint64(0)); diff != "" {
+			if diff := cmp.Diff(count, 0); diff != "" {
 				t.Fatalf("CountNotClonedRepos:\n%s", diff)
 			}
 		})
@@ -730,11 +690,11 @@ func testStoreCountNotClonedRepos(t *testing.T, store *repos.Store) func(*testin
 
 			sort.Strings(cloned)
 
-			count, err := tx.CountNotClonedRepos(ctx)
+			count, err := tx.RepoStore.Count(ctx, database.ReposListOptions{NoCloned: true})
 			if err != nil {
 				t.Fatalf("CountNotClonedRepos error: %s", err)
 			}
-			if diff := cmp.Diff(count, uint64(7)); diff != "" {
+			if diff := cmp.Diff(count, 7); diff != "" {
 				t.Fatalf("CountNotClonedRepos:\n%s", diff)
 			}
 		}))
@@ -760,11 +720,11 @@ func testStoreCountNotClonedRepos(t *testing.T, store *repos.Store) func(*testin
 				t.Fatalf("UpsertRepos error: %s", err)
 			}
 
-			count, err := tx.CountNotClonedRepos(ctx)
+			count, err := tx.RepoStore.Count(ctx, database.ReposListOptions{NoCloned: true})
 			if err != nil {
 				t.Fatalf("CountNotClonedRepos error: %s", err)
 			}
-			if diff := cmp.Diff(count, uint64(5)); diff != "" {
+			if diff := cmp.Diff(count, 5); diff != "" {
 				t.Fatalf("CountNotClonedRepos:\n%s", diff)
 			}
 		}))
@@ -824,7 +784,7 @@ VALUES
 }
 
 func testSyncRateLimiters(t *testing.T, store *repos.Store) func(*testing.T) {
-	clock := dbtesting.NewFakeClock(time.Now(), 0)
+	clock := timeutil.NewFakeClock(time.Now(), 0)
 	now := clock.Now()
 
 	return func(t *testing.T) {
@@ -878,7 +838,7 @@ func testStoreEnqueueSyncJobs(db *sql.DB, store *repos.Store) func(t *testing.T,
 	return func(t *testing.T, _ *repos.Store) func(*testing.T) {
 		t.Helper()
 
-		clock := dbtesting.NewFakeClock(time.Now(), 0)
+		clock := timeutil.NewFakeClock(time.Now(), 0)
 		now := clock.Now()
 
 		services := generateExternalServices(10, mkExternalServices(now)...)
@@ -992,6 +952,86 @@ func testStoreEnqueueSyncJobs(db *sql.DB, store *repos.Store) func(t *testing.T,
 	}
 }
 
+func testStoreEnqueueSingleSyncJob(db *sql.DB) func(t *testing.T, store *repos.Store) func(*testing.T) {
+	return func(t *testing.T, _ *repos.Store) func(*testing.T) {
+		t.Helper()
+
+		clock := timeutil.NewFakeClock(time.Now(), 0)
+		now := clock.Now()
+
+		return func(t *testing.T) {
+			ctx := context.Background()
+			t.Cleanup(func() {
+				if _, err := db.ExecContext(ctx, "DELETE FROM external_service_sync_jobs;DELETE FROM external_services"); err != nil {
+					t.Fatal(err)
+				}
+			})
+			service := types.ExternalService{
+				Kind:        extsvc.KindGitHub,
+				DisplayName: "Github - Test",
+				Config:      `{"url": "https://github.com", "repositoryQuery": ["none"], "token": "abc"}`,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}
+
+			// Create a new external service
+			confGet := func() *conf.Unified {
+				return &conf.Unified{}
+			}
+			err := database.ExternalServices(db).Create(ctx, confGet, &service)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			assertCount := func(t *testing.T, want int) {
+				t.Helper()
+				var count int
+				if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM external_service_sync_jobs").Scan(&count); err != nil {
+					t.Fatal(err)
+				}
+				if count != want {
+					t.Fatalf("Expected %d rows, got %d", want, count)
+				}
+			}
+			assertCount(t, 0)
+
+			rs := repos.NewStore(db, sql.TxOptions{})
+			err = rs.EnqueueSingleSyncJob(ctx, service.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertCount(t, 1)
+
+			// Doing it again should not fail or add a new row
+			err = rs.EnqueueSingleSyncJob(ctx, service.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertCount(t, 1)
+
+			// If we change status to processing it should not add a new row
+			if _, err := db.ExecContext(ctx, "UPDATE external_service_sync_jobs SET state='processing'"); err != nil {
+				t.Fatal(err)
+			}
+			err = rs.EnqueueSingleSyncJob(ctx, service.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertCount(t, 1)
+
+			// If we change status to completed we should be able to enqueue another one
+			if _, err := db.ExecContext(ctx, "UPDATE external_service_sync_jobs SET state='completed'"); err != nil {
+				t.Fatal(err)
+			}
+			err = rs.EnqueueSingleSyncJob(ctx, service.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertCount(t, 2)
+		}
+	}
+}
+
 func mkRepos(n int, base ...*types.Repo) types.Repos {
 	if len(base) == 0 {
 		return nil
@@ -1042,7 +1082,7 @@ func transact(ctx context.Context, s *repos.Store, test func(testing.TB, *repos.
 }
 
 func createExternalServices(t *testing.T, store *repos.Store) map[string]*types.ExternalService {
-	clock := dbtesting.NewFakeClock(time.Now(), 0)
+	clock := timeutil.NewFakeClock(time.Now(), 0)
 	now := clock.Now()
 
 	svcs := mkExternalServices(now)
@@ -1052,7 +1092,7 @@ func createExternalServices(t *testing.T, store *repos.Store) map[string]*types.
 		t.Fatalf("failed to insert external services: %v", err)
 	}
 
-	services, err := store.ExternalServiceStore.List(context.Background(), idb.ExternalServicesListOptions{})
+	services, err := store.ExternalServiceStore.List(context.Background(), database.ExternalServicesListOptions{})
 	if err != nil {
 		t.Fatal("failed to list external services")
 	}

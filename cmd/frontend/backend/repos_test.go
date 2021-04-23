@@ -15,7 +15,7 @@ import (
 
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/inventory"
 	"github.com/sourcegraph/sourcegraph/internal/api"
-	"github.com/sourcegraph/sourcegraph/internal/db"
+	"github.com/sourcegraph/sourcegraph/internal/database"
 	"github.com/sourcegraph/sourcegraph/internal/rcache"
 	"github.com/sourcegraph/sourcegraph/internal/repoupdater"
 	"github.com/sourcegraph/sourcegraph/internal/repoupdater/protocol"
@@ -30,7 +30,7 @@ func TestReposService_Get(t *testing.T) {
 
 	wantRepo := &types.Repo{ID: 1, Name: "github.com/u/r"}
 
-	calledGet := db.Mocks.Repos.MockGet_Return(t, wantRepo)
+	calledGet := database.Mocks.Repos.MockGet_Return(t, wantRepo)
 
 	repo, err := s.Get(ctx, 1)
 	if err != nil {
@@ -54,9 +54,9 @@ func TestReposService_List(t *testing.T) {
 		{Name: "r2"},
 	}
 
-	calledList := db.Mocks.Repos.MockList(t, "r1", "r2")
+	calledList := database.Mocks.Repos.MockList(t, "r1", "r2")
 
-	repos, err := s.List(ctx, db.ReposListOptions{})
+	repos, err := s.List(ctx, database.ReposListOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,6 +73,7 @@ func TestRepos_Add(t *testing.T) {
 	ctx := testContext()
 
 	const repoName = "my/repo"
+	const newName = "my/repo2"
 
 	calledRepoLookup := false
 	repoupdater.MockRepoLookup = func(args protocol.RepoLookupArgs) (*protocol.RepoLookupResult, error) {
@@ -81,13 +82,18 @@ func TestRepos_Add(t *testing.T) {
 			t.Errorf("got %q, want %q", args.Repo, repoName)
 		}
 		return &protocol.RepoLookupResult{
-			Repo: &protocol.RepoInfo{Name: repoName, Description: "d"},
+			Repo: &protocol.RepoInfo{Name: newName, Description: "d"},
 		}, nil
 	}
 	defer func() { repoupdater.MockRepoLookup = nil }()
 
-	if err := s.Add(ctx, repoName); err != nil {
+	// The repoName could change if it has been renamed on the code host
+	addedName, err := s.Add(ctx, repoName)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if addedName != newName {
+		t.Fatalf("Want %q, got %q", newName, addedName)
 	}
 	if !calledRepoLookup {
 		t.Error("!calledRepoLookup")

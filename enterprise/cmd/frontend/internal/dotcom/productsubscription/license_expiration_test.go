@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/efritz/glock"
+	"github.com/derision-test/glock"
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/license"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/licensing"
 	"github.com/sourcegraph/sourcegraph/internal/conf"
-	"github.com/sourcegraph/sourcegraph/internal/db"
+	"github.com/sourcegraph/sourcegraph/internal/database"
 	"github.com/sourcegraph/sourcegraph/internal/slack"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 	"github.com/sourcegraph/sourcegraph/schema"
@@ -61,7 +61,7 @@ func TestCheckForUpcomingLicenseExpirations(t *testing.T) {
 		}
 		return infos[licenseKey], "", nil
 	}
-	db.Mocks.Users.GetByID = func(ctx context.Context, id int32) (*types.User, error) {
+	database.Mocks.Users.GetByID = func(ctx context.Context, id int32) (*types.User, error) {
 		return &types.User{Username: "alice"}, nil
 	}
 	t.Cleanup(func() {
@@ -69,11 +69,11 @@ func TestCheckForUpcomingLicenseExpirations(t *testing.T) {
 		mocks.subscriptions = mockSubscriptions{}
 		mocks.licenses = mockLicenses{}
 		licensing.MockParseProductLicenseKeyWithBuiltinOrGenerationKey = nil
-		db.Mocks.Users = db.MockUsers{}
+		database.Mocks.Users = database.MockUsers{}
 	})
 
 	client := &fakeSlackClient{}
-	checkForUpcomingLicenseExpirations(clock, client)
+	checkForUpcomingLicenseExpirations(nil, clock, client)
 
 	wantPayloads := []*slack.Payload{
 		{Text: "The license for user `alice` <https://sourcegraph.com/site-admin/dotcom/product/subscriptions/e9450fb2-87c7-47ae-a713-a376c4618faa|will expire *in the next 24 hours*> :rotating_light:"},

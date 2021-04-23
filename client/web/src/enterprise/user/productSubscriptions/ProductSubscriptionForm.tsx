@@ -1,12 +1,19 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import * as H from 'history'
 import React, { useState, useMemo, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { ReactStripeElements } from 'react-stripe-elements'
 import { from, of, throwError, Observable } from 'rxjs'
 import { catchError, startWith, switchMap } from 'rxjs/operators'
-import * as GQL from '../../../../../shared/src/graphql/schema'
-import { asError, ErrorLike, isErrorLike } from '../../../../../shared/src/util/errors'
-import { Form } from '../../../../../branded/src/components/Form'
+
+import { Form } from '@sourcegraph/branded/src/components/Form'
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { Scalars } from '@sourcegraph/shared/src/graphql-operations'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { asError, ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { useEventObservable } from '@sourcegraph/shared/src/util/useObservable'
+
+import { ErrorAlert } from '../../../components/alerts'
 import { StripeWrapper } from '../../dotcom/billing/StripeWrapper'
 import { ProductPlanFormControl } from '../../dotcom/productPlans/ProductPlanFormControl'
 import {
@@ -14,14 +21,10 @@ import {
     MIN_USER_COUNT,
 } from '../../dotcom/productPlans/ProductSubscriptionUserCountFormControl'
 import { LicenseGenerationKeyWarning } from '../../productSubscription/LicenseGenerationKeyWarning'
+
 import { NewProductSubscriptionPaymentSection } from './NewProductSubscriptionPaymentSection'
 import { PaymentTokenFormControl } from './PaymentTokenFormControl'
 import { productSubscriptionInputForLocationHash } from './UserSubscriptionsNewProductSubscriptionPage'
-import { ThemeProps } from '../../../../../shared/src/theme'
-import { ErrorAlert } from '../../../components/alerts'
-import { useEventObservable } from '../../../../../shared/src/util/useObservable'
-import * as H from 'history'
-import { Scalars } from '../../../../../shared/src/graphql-operations'
 
 export enum PaymentValidity {
     Valid = 'Valid',
@@ -205,7 +208,7 @@ const _ProductSubscriptionForm: React.FunctionComponent<Props & ReactStripeEleme
                     <div className="col-md-6">
                         <ProductSubscriptionUserCountFormControl value={userCount} onChange={setUserCount} />
                         <h4 className="mt-2 mb-0">Plan</h4>
-                        <ProductPlanFormControl value={billingPlanID} onChange={setBillingPlanID} history={history} />
+                        <ProductPlanFormControl value={billingPlanID} onChange={setBillingPlanID} />
                     </div>
                     <div className="col-md-6 mt-3 mt-md-0">
                         <h3 className="mt-2 mb-0">Billing</h3>
@@ -266,8 +269,8 @@ const _ProductSubscriptionForm: React.FunctionComponent<Props & ReactStripeEleme
                     </div>
                 </div>
             </Form>
-            {isErrorLike(paymentToken) && <ErrorAlert className="mt-3" error={paymentToken} history={history} />}
-            {isErrorLike(submissionState) && <ErrorAlert className="mt-3" error={submissionState} history={history} />}
+            {isErrorLike(paymentToken) && <ErrorAlert className="mt-3" error={paymentToken} />}
+            {isErrorLike(submissionState) && <ErrorAlert className="mt-3" error={submissionState} />}
         </div>
     )
 }

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -16,30 +17,39 @@ import (
 	"github.com/graph-gophers/graphql-go"
 	"github.com/inconshreveable/log15"
 	"github.com/keegancsmith/tmpfriend"
+	"github.com/opentracing/opentracing-go"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/throttled/throttled/v2/store/redigostore"
 
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/backend"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/enterprise"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/envvar"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/globals"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend"
+	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/app/ui"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/app/updatecheck"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/bg"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/cli/loghandlers"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/siteid"
+	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/vfsutil"
 	"github.com/sourcegraph/sourcegraph/internal/conf"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbconn"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbutil"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbconn"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	"github.com/sourcegraph/sourcegraph/internal/debugserver"
+	"github.com/sourcegraph/sourcegraph/internal/encryption/keyring"
 	"github.com/sourcegraph/sourcegraph/internal/env"
 	"github.com/sourcegraph/sourcegraph/internal/goroutine"
 	"github.com/sourcegraph/sourcegraph/internal/httpserver"
 	"github.com/sourcegraph/sourcegraph/internal/logging"
+	"github.com/sourcegraph/sourcegraph/internal/observation"
+	"github.com/sourcegraph/sourcegraph/internal/oobmigration"
 	"github.com/sourcegraph/sourcegraph/internal/profiler"
+	"github.com/sourcegraph/sourcegraph/internal/redispool"
 	"github.com/sourcegraph/sourcegraph/internal/sysreq"
 	"github.com/sourcegraph/sourcegraph/internal/trace"
 	"github.com/sourcegraph/sourcegraph/internal/tracer"
 	"github.com/sourcegraph/sourcegraph/internal/version"
-	"github.com/sourcegraph/sourcegraph/internal/vfsutil"
 )
 
 var (
@@ -83,11 +93,11 @@ func defaultExternalURL(nginxAddr, httpAddr string) *url.URL {
 	return &url.URL{Scheme: "http", Host: hostPort}
 }
 
-// InitDB initializes the global database connection and sets the
+// InitDB initializes and returns the global database connection and sets the
 // version of the frontend in our versions table.
-func InitDB() error {
+func InitDB() (*sql.DB, error) {
 	if err := dbconn.SetupGlobalConnection(""); err != nil {
-		return fmt.Errorf("failed to connect to frontend database: %s", err)
+		return nil, fmt.Errorf("failed to connect to frontend database: %s", err)
 	}
 
 	ctx := context.Background()
@@ -99,16 +109,16 @@ func InitDB() error {
 		// it's missing, we run the migrations and try to update the version again.
 
 		err := backend.UpdateServiceVersion(ctx, "frontend", version.Version())
-		if err != nil && !dbutil.IsPostgresError(err, "undefined_table") {
-			return err
+		if err != nil && !dbutil.IsPostgresError(err, "42P01") {
+			return nil, err
 		}
 
 		if !migrate {
-			return nil
+			return dbconn.Global, nil
 		}
 
-		if err := dbconn.MigrateDB(dbconn.Global, "frontend"); err != nil {
-			return err
+		if err := dbconn.MigrateDB(dbconn.Global, dbconn.Frontend); err != nil {
+			return nil, err
 		}
 
 		migrate = false
@@ -116,7 +126,9 @@ func InitDB() error {
 }
 
 // Main is the main entrypoint for the frontend server program.
-func Main(enterpriseSetupHook func() enterprise.Services) error {
+func Main(enterpriseSetupHook func(db dbutil.DB, outOfBandMigrationRunner *oobmigration.Runner) enterprise.Services) error {
+	ctx := context.Background()
+
 	log.SetFlags(0)
 	log.SetPrefix("")
 
@@ -124,16 +136,37 @@ func Main(enterpriseSetupHook func() enterprise.Services) error {
 		log.Fatalf("failed to initialize profiling: %v", err)
 	}
 
-	if err := InitDB(); err != nil {
+	ready := make(chan struct{})
+	go debugserver.NewServerRoutine(ready).Start()
+
+	db, err := InitDB()
+	if err != nil {
 		log.Fatalf("ERROR: %v", err)
 	}
 
-	if err := handleConfigOverrides(); err != nil {
-		log.Fatal("applying config overrides:", err)
-	}
+	ui.InitRouter(db)
 
+	// override site config first
+	if err := overrideSiteConfig(ctx); err != nil {
+		log.Fatalf("failed to apply site config overrides: %v", err)
+	}
 	globals.ConfigurationServerFrontendOnly = conf.InitConfigurationServerFrontendOnly(&configurationSource{})
 	conf.MustValidateDefaults()
+
+	// now we can init the keyring, as it depends on site config
+	if err := keyring.Init(ctx); err != nil {
+		log.Fatalf("failed to initialize encryption keyring: %v", err)
+	}
+
+	if err := overrideGlobalSettings(ctx, db); err != nil {
+		log.Fatalf("failed to override global settings: %v", err)
+	}
+
+	// now the keyring is configured it's safe to override the rest of the config
+	// and that config can access the keyring
+	if err := overrideExtSvcConfig(ctx, db); err != nil {
+		log.Fatalf("failed to override external service config: %v", err)
+	}
 
 	// Filter trace logs
 	d, _ := time.ParseDuration(traceThreshold)
@@ -141,8 +174,30 @@ func Main(enterpriseSetupHook func() enterprise.Services) error {
 	tracer.Init()
 	trace.Init(true)
 
+	// Create an out-of-band migration runner onto which each enterprise init function
+	// can register migration routines to run in the background while they still have
+	// work remaining.
+	outOfBandMigrationRunner := oobmigration.NewRunnerWithDB(db, time.Second*30, &observation.Context{
+		Logger:     log15.Root(),
+		Tracer:     &trace.Tracer{Tracer: opentracing.GlobalTracer()},
+		Registerer: prometheus.DefaultRegisterer,
+	})
+
+	// Run a background job to handle encryption of external service configuration.
+	extsvcMigrator := database.NewExternalServiceConfigMigratorWithDB(db)
+	extsvcMigrator.AllowDecrypt = os.Getenv("ALLOW_DECRYPT_MIGRATION") == "true"
+	if err := outOfBandMigrationRunner.Register(extsvcMigrator.ID(), extsvcMigrator, oobmigration.MigratorOptions{Interval: 3 * time.Second}); err != nil {
+		log.Fatalf("failed to run external service encryption job: %v", err)
+	}
+	// Run a background job to handle encryption of external service configuration.
+	extAccMigrator := database.NewExternalAccountsMigratorWithDB(db)
+	extAccMigrator.AllowDecrypt = os.Getenv("ALLOW_DECRYPT_MIGRATION") == "true"
+	if err := outOfBandMigrationRunner.Register(extAccMigrator.ID(), extAccMigrator, oobmigration.MigratorOptions{Interval: 3 * time.Second}); err != nil {
+		log.Fatalf("failed to run user external account encryption job: %v", err)
+	}
+
 	// Run enterprise setup hook
-	enterprise := enterpriseSetupHook()
+	enterprise := enterpriseSetupHook(db, outOfBandMigrationRunner)
 
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {
@@ -153,7 +208,7 @@ func Main(enterpriseSetupHook func() enterprise.Services) error {
 			env.PrintHelp()
 
 			log.Print()
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 			for _, st := range sysreq.Check(ctx, skippedSysReqs()) {
 				log.Printf("%s:", st.Name)
@@ -191,19 +246,15 @@ func Main(enterpriseSetupHook func() enterprise.Services) error {
 		return err
 	}
 
-	go debugserver.Start()
-
 	siteid.Init()
 
 	globals.WatchExternalURL(defaultExternalURL(nginxAddr, httpAddr))
 	globals.WatchPermissionsUserMapping()
 
-	goroutine.Go(func() { bg.MigrateAllSettingsMOTDToNotices(context.Background()) })
-	goroutine.Go(func() { bg.MigrateSavedQueriesAndSlackWebhookURLsFromSettingsToDatabase(context.Background()) })
 	goroutine.Go(func() { bg.CheckRedisCacheEvictionPolicy() })
 	goroutine.Go(func() { bg.DeleteOldCacheDataInRedis() })
 	goroutine.Go(func() { bg.DeleteOldEventLogsInPostgres(context.Background()) })
-	go updatecheck.Start()
+	go updatecheck.Start(db)
 
 	// Parse GraphQL schema and set up resolvers that depend on dbconn.Global
 	// being initialized
@@ -211,22 +262,31 @@ func Main(enterpriseSetupHook func() enterprise.Services) error {
 		return errors.New("dbconn.Global is nil when trying to parse GraphQL schema")
 	}
 
-	schema, err := graphqlbackend.NewSchema(enterprise.CampaignsResolver, enterprise.CodeIntelResolver, enterprise.AuthzResolver, enterprise.CodeMonitorsResolver, enterprise.LicenseResolver)
+	schema, err := graphqlbackend.NewSchema(db, enterprise.BatchChangesResolver, enterprise.CodeIntelResolver, enterprise.InsightsResolver, enterprise.AuthzResolver, enterprise.CodeMonitorsResolver, enterprise.LicenseResolver, enterprise.DotcomResolver)
 	if err != nil {
 		return err
 	}
 
-	server, err := makeExternalAPI(schema, enterprise)
+	ratelimitStore, err := redigostore.New(redispool.Cache, "gql:rl:", 0)
+	if err != nil {
+		return err
+	}
+	rateLimitWatcher := graphqlbackend.NewBasicLimitWatcher(ratelimitStore)
+
+	server, err := makeExternalAPI(db, schema, enterprise, rateLimitWatcher)
 	if err != nil {
 		return err
 	}
 
-	internalAPI, err := makeInternalAPI(schema, enterprise)
+	internalAPI, err := makeInternalAPI(schema, db, enterprise, rateLimitWatcher)
 	if err != nil {
 		return err
 	}
 
-	routines := []goroutine.BackgroundRoutine{server}
+	routines := []goroutine.BackgroundRoutine{
+		server,
+		outOfBandMigrationRunner,
+	}
 	if internalAPI != nil {
 		routines = append(routines, internalAPI)
 	}
@@ -237,14 +297,15 @@ func Main(enterpriseSetupHook func() enterprise.Services) error {
 		fmt.Println(" ")
 	}
 	fmt.Printf("✱ Sourcegraph is ready at: %s\n", globals.ExternalURL())
+	close(ready)
 
 	goroutine.MonitorBackgroundRoutines(context.Background(), routines...)
 	return nil
 }
 
-func makeExternalAPI(schema *graphql.Schema, enterprise enterprise.Services) (goroutine.BackgroundRoutine, error) {
+func makeExternalAPI(db dbutil.DB, schema *graphql.Schema, enterprise enterprise.Services, rateLimiter graphqlbackend.LimitWatcher) (goroutine.BackgroundRoutine, error) {
 	// Create the external HTTP handler.
-	externalHandler, err := newExternalHTTPHandler(schema, enterprise.GitHubWebhook, enterprise.GitLabWebhook, enterprise.BitbucketServerWebhook, enterprise.NewCodeIntelUploadHandler, enterprise.NewExecutorProxyHandler)
+	externalHandler, err := newExternalHTTPHandler(db, schema, enterprise.GitHubWebhook, enterprise.GitLabWebhook, enterprise.BitbucketServerWebhook, enterprise.NewCodeIntelUploadHandler, enterprise.NewExecutorProxyHandler, rateLimiter)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +325,7 @@ func makeExternalAPI(schema *graphql.Schema, enterprise enterprise.Services) (go
 	return server, nil
 }
 
-func makeInternalAPI(schema *graphql.Schema, enterprise enterprise.Services) (goroutine.BackgroundRoutine, error) {
+func makeInternalAPI(schema *graphql.Schema, db dbutil.DB, enterprise enterprise.Services, rateLimiter graphqlbackend.LimitWatcher) (goroutine.BackgroundRoutine, error) {
 	if httpAddrInternal == "" {
 		return nil, nil
 	}
@@ -275,7 +336,7 @@ func makeInternalAPI(schema *graphql.Schema, enterprise enterprise.Services) (go
 	}
 
 	// The internal HTTP handler does not include the auth handlers.
-	internalHandler := newInternalHTTPHandler(schema, enterprise.NewCodeIntelUploadHandler)
+	internalHandler := newInternalHTTPHandler(schema, db, enterprise.NewCodeIntelUploadHandler, rateLimiter)
 
 	server := httpserver.New(listener, &http.Server{
 		Handler:     internalHandler,

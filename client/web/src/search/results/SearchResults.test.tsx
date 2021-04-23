@@ -1,17 +1,20 @@
+import { cleanup, getAllByTestId, getByTestId, render, waitFor } from '@testing-library/react'
 import { createBrowserHistory } from 'history'
 import React from 'react'
 import { BrowserRouter } from 'react-router-dom'
-import { cleanup, getAllByTestId, getByTestId, render, waitFor } from '@testing-library/react'
 import { noop, NEVER } from 'rxjs'
 import sinon from 'sinon'
+
 import {
     extensionsController,
     HIGHLIGHTED_FILE_LINES_REQUEST,
     NOOP_SETTINGS_CASCADE,
     OBSERVABLE_SEARCH_REQUEST,
-} from '../../../../shared/src/util/searchTestHelpers'
-import { SearchResults, SearchResultsProps } from './SearchResults'
+} from '@sourcegraph/shared/src/util/searchTestHelpers'
+
 import { SearchPatternType } from '../../graphql-operations'
+
+import { SearchResults, SearchResultsProps } from './SearchResults'
 
 describe('SearchResults', () => {
     afterAll(cleanup)
@@ -23,7 +26,7 @@ describe('SearchResults', () => {
         authenticatedUser: null,
         location: history.location,
         history,
-        navbarSearchQueryState: { query: '', cursorPosition: 0 },
+        navbarSearchQueryState: { query: '' },
         fetchHighlightedFileLineRanges: HIGHLIGHTED_FILE_LINES_REQUEST,
         searchRequest: OBSERVABLE_SEARCH_REQUEST,
         isLightTheme: true,
@@ -34,18 +37,16 @@ describe('SearchResults', () => {
         telemetryService: { log: noop, logViewEvent: noop },
         deployType: 'dev',
         patternType: SearchPatternType.regexp,
+        parsedSearchQuery: 'r:golang/oauth2 test f:travis',
         caseSensitive: false,
-        interactiveSearchMode: false,
-        filtersInQuery: {},
-        toggleSearchMode: sinon.fake(),
-        onFiltersInQueryChange: sinon.fake(),
-        splitSearchModes: false,
         setPatternType: sinon.spy(),
         setCaseSensitivity: sinon.spy(),
         versionContext: undefined,
-        setVersionContext: () => undefined,
+        selectedSearchContextSpec: 'global',
+        setVersionContext: () => Promise.resolve(undefined),
         availableVersionContexts: undefined,
         previousVersionContext: 'sg-last-version-context',
+        enableCodeMonitoring: false,
     }
 
     it('calls the search request once', () => {

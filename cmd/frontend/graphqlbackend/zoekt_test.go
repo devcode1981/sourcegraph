@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,46 +18,26 @@ import (
 	zoektrpc "github.com/google/zoekt/rpc"
 	"github.com/keegancsmith/sqlf"
 
+	searchrepos "github.com/sourcegraph/sourcegraph/cmd/frontend/internal/search/repos"
 	"github.com/sourcegraph/sourcegraph/internal/api"
-	"github.com/sourcegraph/sourcegraph/internal/db"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbconn"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbtesting"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbconn"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbtesting"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc"
 	"github.com/sourcegraph/sourcegraph/internal/search"
 	searchbackend "github.com/sourcegraph/sourcegraph/internal/search/backend"
 	"github.com/sourcegraph/sourcegraph/internal/search/query"
-	"github.com/sourcegraph/sourcegraph/internal/symbols/protocol"
+	"github.com/sourcegraph/sourcegraph/internal/search/result"
+	"github.com/sourcegraph/sourcegraph/internal/search/streaming"
+	zoektutil "github.com/sourcegraph/sourcegraph/internal/search/zoekt"
 	"github.com/sourcegraph/sourcegraph/internal/trace"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 	"github.com/sourcegraph/sourcegraph/schema"
 )
 
-// fakeSearcher is a zoekt.Searcher that returns a predefined search result.
-type fakeSearcher struct {
-	result *zoekt.SearchResult
-
-	repos []*zoekt.RepoListEntry
-
-	// Default all unimplemented zoekt.Searcher methods to panic.
-	zoekt.Searcher
-}
-
-func (ss *fakeSearcher) Search(ctx context.Context, q zoektquery.Q, opts *zoekt.SearchOptions) (*zoekt.SearchResult, error) {
-	if ss.result == nil {
-		return &zoekt.SearchResult{}, nil
-	}
-	return ss.result, nil
-}
-
-func (ss *fakeSearcher) List(ctx context.Context, q zoektquery.Q) (*zoekt.RepoList, error) {
-	return &zoekt.RepoList{Repos: ss.repos}, nil
-}
-
-func (ss *fakeSearcher) String() string {
-	return fmt.Sprintf("fakeSearcher(result = %v, repos = %v)", ss.result, ss.repos)
-}
-
 func TestIndexedSearch(t *testing.T) {
+	db := new(dbtesting.MockDB)
+
 	zeroTimeoutCtx, cancel := context.WithTimeout(context.Background(), 0)
 	defer cancel()
 	type args struct {
@@ -70,9 +51,6 @@ func TestIndexedSearch(t *testing.T) {
 	}
 
 	reposHEAD := makeRepositoryRevisions("foo/bar", "foo/foobar")
-	repoBar := reposHEAD[0].Repo
-	repoFooBar := reposHEAD[1].Repo
-	repos := []*types.RepoName{repoBar, repoFooBar}
 	zoektRepos := []*zoekt.RepoListEntry{{
 		Repository: zoekt.Repository{
 			Name:     "foo/bar",
@@ -92,7 +70,7 @@ func TestIndexedSearch(t *testing.T) {
 		wantMatchURLs      []string
 		wantMatchInputRevs []string
 		wantUnindexed      []*search.RepositoryRevisions
-		wantCommon         searchResultsCommon
+		wantCommon         streaming.Stats
 		wantErr            bool
 	}{
 		{
@@ -103,10 +81,6 @@ func TestIndexedSearch(t *testing.T) {
 				repos:           reposHEAD,
 				useFullDeadline: false,
 				since:           func(time.Time) time.Duration { return time.Second - time.Millisecond },
-			},
-			wantCommon: searchResultsCommon{
-				searched: repos,
-				indexed:  repos,
 			},
 			wantErr: false,
 		},
@@ -119,10 +93,11 @@ func TestIndexedSearch(t *testing.T) {
 				useFullDeadline: false,
 				since:           func(time.Time) time.Duration { return time.Minute },
 			},
-			wantCommon: searchResultsCommon{
-				searched: repos,
-				indexed:  repos,
-				timedout: repos,
+			wantCommon: streaming.Stats{
+				Status: mkStatusMap(map[string]search.RepoStatus{
+					"foo/bar":    search.RepoStatusTimedout,
+					"foo/foobar": search.RepoStatusTimedout,
+				}),
 			},
 		},
 		{
@@ -134,11 +109,7 @@ func TestIndexedSearch(t *testing.T) {
 				useFullDeadline: true,
 				since:           func(time.Time) time.Duration { return 0 },
 			},
-			wantCommon: searchResultsCommon{
-				searched: repos,
-				indexed:  repos,
-				timedout: repos,
-			},
+			wantErr: true,
 		},
 		{
 			name: "results",
@@ -194,10 +165,6 @@ func TestIndexedSearch(t *testing.T) {
 				"",
 				"",
 			},
-			wantCommon: searchResultsCommon{
-				searched: repos,
-				indexed:  repos,
-			},
 			wantErr: false,
 		},
 		{
@@ -222,10 +189,7 @@ func TestIndexedSearch(t *testing.T) {
 				},
 				since: func(time.Time) time.Duration { return 0 },
 			},
-			wantCommon: searchResultsCommon{
-				searched: []*types.RepoName{repoBar},
-				indexed:  []*types.RepoName{repoBar},
-			},
+			wantMatchCount: 3,
 			wantMatchURLs: []string{
 				"git://foo/bar?HEAD#baz.go",
 				"git://foo/bar?dev#baz.go",
@@ -256,14 +220,11 @@ func TestIndexedSearch(t *testing.T) {
 					},
 				},
 			},
-			wantCommon: searchResultsCommon{
-				searched: []*types.RepoName{repoBar},
-				indexed:  []*types.RepoName{repoBar},
-			},
 			wantUnindexed: makeRepositoryRevisions("foo/bar@unindexed"),
 			wantMatchURLs: []string{
 				"git://foo/bar?HEAD#baz.go",
 			},
+			wantMatchCount:     1,
 			wantMatchInputRevs: []string{"HEAD"},
 		},
 		{
@@ -298,7 +259,7 @@ func TestIndexedSearch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			q, err := query.ParseAndCheck(tt.args.query)
+			q, err := query.ParseLiteral(tt.args.query)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -309,15 +270,15 @@ func TestIndexedSearch(t *testing.T) {
 				RepoPromise:     (&search.Promise{}).Resolve(tt.args.repos),
 				UseFullDeadline: tt.args.useFullDeadline,
 				Zoekt: &searchbackend.Zoekt{
-					Client: &fakeSearcher{
-						result: &zoekt.SearchResult{Files: tt.args.results},
-						repos:  zoektRepos,
+					Client: &searchbackend.FakeSearcher{
+						Result: &zoekt.SearchResult{Files: tt.args.results},
+						Repos:  zoektRepos,
 					},
 					DisableCache: true,
 				},
 			}
 
-			indexed, err := newIndexedSearchRequest(context.Background(), args, textRequest)
+			indexed, err := newIndexedSearchRequest(context.Background(), db, args, textRequest, StreamFunc(func(SearchEvent) {}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -328,11 +289,21 @@ func TestIndexedSearch(t *testing.T) {
 
 			indexed.since = tt.args.since
 
-			gotCommon, gotFm, err := indexed.Search(tt.args.ctx)
+			// This is a quick fix which will break once we enable the zoekt client for true streaming.
+			// Once we return more than one event we have to account for the proper order of results
+			// in the tests.
+			gotResults, gotCommon, err := collectStream(func(stream Sender) error {
+				return indexed.Search(tt.args.ctx, stream)
+			})
 			if (err != nil) != tt.wantErr {
 				t.Errorf("zoektSearchHEAD() error = %v, wantErr = %v", err, tt.wantErr)
 				return
 			}
+			gotFm, err := searchResultsToFileMatchResults(gotResults)
+			if err != nil {
+				t.Fatal(err)
+			}
+
 			if diff := cmp.Diff(&tt.wantCommon, &gotCommon, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("common mismatch (-want +got):\n%s", diff)
 			}
@@ -341,7 +312,7 @@ func TestIndexedSearch(t *testing.T) {
 			var gotMatchURLs []string
 			var gotMatchInputRevs []string
 			for _, m := range gotFm {
-				gotMatchCount += m.MatchCount
+				gotMatchCount += int(m.ResultCount())
 				gotMatchURLs = append(gotMatchURLs, m.Resource())
 				if m.InputRev != nil {
 					gotMatchInputRevs = append(gotMatchInputRevs, *m.InputRev)
@@ -511,7 +482,7 @@ func TestZoektResultCountFactor(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			got := zoektResultCountFactor(tt.numRepos, tt.pattern.FileMatchLimit, tt.globalSearch)
+			got := zoektutil.ResultCountFactor(tt.numRepos, tt.pattern.FileMatchLimit, tt.globalSearch)
 			if tt.want != got {
 				t.Fatalf("Want scaling factor %d but got %d", tt.want, got)
 			}
@@ -620,6 +591,51 @@ func TestQueryToZoektQuery(t *testing.T) {
 			Query: `f:test`,
 		},
 		{
+			Name: "content matches only",
+			Type: textRequest,
+			Pattern: &search.TextPatternInfo{
+				IsRegExp:                     true,
+				IsCaseSensitive:              false,
+				Pattern:                      "test",
+				IncludePatterns:              []string{},
+				ExcludePattern:               ``,
+				PathPatternsAreCaseSensitive: true,
+				PatternMatchesContent:        true,
+				PatternMatchesPath:           false,
+			},
+			Query: `c:test`,
+		},
+		{
+			Name: "content and path matches 1",
+			Type: textRequest,
+			Pattern: &search.TextPatternInfo{
+				IsRegExp:                     true,
+				IsCaseSensitive:              false,
+				Pattern:                      "test",
+				IncludePatterns:              []string{},
+				ExcludePattern:               ``,
+				PathPatternsAreCaseSensitive: true,
+				PatternMatchesContent:        true,
+				PatternMatchesPath:           true,
+			},
+			Query: `test`,
+		},
+		{
+			Name: "content and path matches 2",
+			Type: textRequest,
+			Pattern: &search.TextPatternInfo{
+				IsRegExp:                     true,
+				IsCaseSensitive:              false,
+				Pattern:                      "test",
+				IncludePatterns:              []string{},
+				ExcludePattern:               ``,
+				PathPatternsAreCaseSensitive: true,
+				PatternMatchesContent:        false,
+				PatternMatchesPath:           false,
+			},
+			Query: `test`,
+		},
+		{
 			Name: "repos must include",
 			Type: textRequest,
 			Pattern: &search.TextPatternInfo{
@@ -666,36 +682,47 @@ func queryEqual(a, b zoektquery.Q) bool {
 }
 
 func BenchmarkSearchResults(b *testing.B) {
+	db := new(dbtesting.MockDB)
+
 	minimalRepos, _, zoektRepos := generateRepos(5000)
 	zoektFileMatches := generateZoektMatches(50)
 
 	z := &searchbackend.Zoekt{
-		Client: &fakeSearcher{
-			repos:  zoektRepos,
-			result: &zoekt.SearchResult{Files: zoektFileMatches},
+		Client: &searchbackend.FakeSearcher{
+			Repos:  zoektRepos,
+			Result: &zoekt.SearchResult{Files: zoektFileMatches},
 		},
 		DisableCache: true,
 	}
 
 	ctx := context.Background()
 
-	db.Mocks.Repos.List = func(_ context.Context, op db.ReposListOptions) ([]*types.Repo, error) {
+	database.Mocks.Repos.List = func(_ context.Context, op database.ReposListOptions) ([]*types.Repo, error) {
 		return minimalRepos, nil
 	}
-	db.Mocks.Repos.Count = func(ctx context.Context, opt db.ReposListOptions) (int, error) {
+	database.Mocks.Repos.Count = func(ctx context.Context, opt database.ReposListOptions) (int, error) {
 		return len(minimalRepos), nil
 	}
-	defer func() { db.Mocks = db.MockStores{} }()
+	defer func() { database.Mocks = database.MockStores{} }()
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for n := 0; n < b.N; n++ {
-		q, err := query.ProcessAndOr(`print index:only count:350`, query.ParserOptions{SearchType: query.SearchTypeLiteral})
+		q, err := query.ParseLiteral(`print index:only count:350`)
 		if err != nil {
 			b.Fatal(err)
 		}
-		resolver := &searchResolver{query: q, zoekt: z, userSettings: &schema.Settings{}}
+		resolver := &searchResolver{
+			db: db,
+			SearchInputs: &SearchInputs{
+				Query:        q,
+				UserSettings: &schema.Settings{},
+			},
+			zoekt:    z,
+			reposMu:  &sync.Mutex{},
+			resolved: &searchrepos.Resolved{},
+		}
 		results, err := resolver.Results(ctx)
 		if err != nil {
 			b.Fatal("Results:", err)
@@ -707,20 +734,20 @@ func BenchmarkSearchResults(b *testing.B) {
 }
 
 func BenchmarkIntegrationSearchResults(b *testing.B) {
-	dbtesting.SetupGlobalTestDB(b)
+	db := dbtesting.GetDB(b)
 
 	ctx := context.Background()
 
 	_, repos, zoektRepos := generateRepos(5000)
 	zoektFileMatches := generateZoektMatches(50)
 
-	zoektClient, cleanup := zoektRPC(&fakeSearcher{
-		repos:  zoektRepos,
-		result: &zoekt.SearchResult{Files: zoektFileMatches},
+	zoektClient, cleanup := zoektRPC(&searchbackend.FakeSearcher{
+		Repos:  zoektRepos,
+		Result: &zoekt.SearchResult{Files: zoektFileMatches},
 	})
 	defer cleanup()
 	z := &searchbackend.Zoekt{
-		Client:       zoektClient,
+		Client:       &searchbackend.StreamSearchAdapter{zoektClient},
 		DisableCache: true,
 	}
 
@@ -761,11 +788,19 @@ func BenchmarkIntegrationSearchResults(b *testing.B) {
 	b.ReportAllocs()
 
 	for n := 0; n < b.N; n++ {
-		q, err := query.ParseAndCheck(`print index:only count:350`)
+		q, err := query.ParseLiteral(`print index:only count:350`)
 		if err != nil {
 			b.Fatal(err)
 		}
-		resolver := &searchResolver{query: q, zoekt: z}
+		resolver := &searchResolver{
+			db: db,
+			SearchInputs: &SearchInputs{
+				Query: q,
+			},
+			zoekt:    z,
+			reposMu:  &sync.Mutex{},
+			resolved: &searchrepos.Resolved{},
+		}
 		results, err := resolver.Results(ctx)
 		if err != nil {
 			b.Fatal("Results:", err)
@@ -853,7 +888,7 @@ func zoektRPC(s zoekt.Searcher) (zoekt.Searcher, func()) {
 func TestZoektIndexedRepos_single(t *testing.T) {
 	repoRev := func(revSpec string) *search.RepositoryRevisions {
 		return &search.RepositoryRevisions{
-			Repo: &types.RepoName{ID: api.RepoID(0), Name: "test/repo"},
+			Repo: types.RepoName{ID: api.RepoID(0), Name: "test/repo"},
 			Revs: []search.RevisionSpecifier{
 				{RevSpec: revSpec},
 			},
@@ -938,6 +973,7 @@ func TestZoektIndexedRepos_single(t *testing.T) {
 }
 
 func TestZoektFileMatchToSymbolResults(t *testing.T) {
+	db := new(dbtesting.MockDB)
 	symbolInfo := func(sym string) *zoekt.Symbol {
 		return &zoekt.Symbol{
 			Sym:        sym,
@@ -954,9 +990,11 @@ func TestZoektFileMatchToSymbolResults(t *testing.T) {
 		Version:    "deadbeef",
 		LineMatches: []zoekt.LineMatch{{
 			// Skips missing symbol info (shouldn't happen in practice).
+			Line:          []byte(""),
 			LineNumber:    5,
 			LineFragments: []zoekt.LineFragmentMatch{{}},
 		}, {
+			Line:       []byte("symbol a symbol b"),
 			LineNumber: 10,
 			LineFragments: []zoekt.LineFragmentMatch{{
 				SymbolInfo: symbolInfo("a"),
@@ -964,53 +1002,56 @@ func TestZoektFileMatchToSymbolResults(t *testing.T) {
 				SymbolInfo: symbolInfo("b"),
 			}},
 		}, {
+			Line:       []byte("symbol c"),
 			LineNumber: 15,
 			LineFragments: []zoekt.LineFragmentMatch{{
 				SymbolInfo: symbolInfo("c"),
 			}},
+		}, {
+			Line:       []byte(`bar() { var regex = /.*\//; function baz() { }  } `),
+			LineNumber: 20,
+			LineFragments: []zoekt.LineFragmentMatch{{
+				SymbolInfo: symbolInfo("baz"),
+			}},
 		}},
 	}
 
-	repo := &RepositoryResolver{innerRepo: &types.Repo{Name: "foo"}}
+	repo := NewRepositoryResolver(db, &types.Repo{Name: "foo"})
 
 	results := zoektFileMatchToSymbolResults(repo, "master", file)
-	var symbols []protocol.Symbol
+	var symbols []result.Symbol
 	for _, res := range results {
-		// Check the fields which are not specific to the symbol
-		if got, want := res.lang, "go"; got != want {
-			t.Fatalf("lang: got %q want %q", got, want)
-		}
-		if got, want := res.baseURI.URL.String(), "git://foo?master"; got != want {
+		if got, want := res.BaseURI.URL.String(), "git://foo?master"; got != want {
 			t.Fatalf("baseURI: got %q want %q", got, want)
 		}
-		if got, want := string(res.commit.repoResolver.innerRepo.Name), "foo"; got != want {
-			t.Fatalf("reporesolver: got %q want %q", got, want)
-		}
-		if got, want := string(res.commit.oid), "deadbeef"; got != want {
-			t.Fatalf("oid: got %q want %q", got, want)
-		}
-		if got, want := *res.commit.inputRev, "master"; got != want {
-			t.Fatalf("inputRev: got %q want %q", got, want)
-		}
 
-		symbols = append(symbols, res.symbol)
+		symbols = append(symbols, res.Symbol)
 	}
 
-	want := []protocol.Symbol{{
-		Name: "a",
-		Line: 10,
+	want := []result.Symbol{{
+		Name:    "a",
+		Line:    10,
+		Pattern: "/^symbol a symbol b$/",
 	}, {
-		Name: "b",
-		Line: 10,
+		Name:    "b",
+		Line:    10,
+		Pattern: "/^symbol a symbol b$/",
 	}, {
-		Name: "c",
-		Line: 15,
-	}}
+		Name:    "c",
+		Line:    15,
+		Pattern: "/^symbol c$/",
+	}, {
+		Name:    "baz",
+		Line:    20,
+		Pattern: `/^bar() { var regex = \/.*\\\/\/; function baz() { }  } $/`,
+	},
+	}
 	for i := range want {
 		want[i].Kind = "kind"
 		want[i].Parent = "parent"
 		want[i].ParentKind = "parentkind"
 		want[i].Path = "bar.go"
+		want[i].Language = "go"
 	}
 
 	if diff := cmp.Diff(want, symbols); diff != "" {
@@ -1024,65 +1065,6 @@ func repoRevsSliceToMap(rs []*search.RepositoryRevisions) map[string]*search.Rep
 		m[string(r.Repo.Name)] = r
 	}
 	return m
-}
-
-func TestContainsRefGlobs(t *testing.T) {
-	tests := []struct {
-		query    string
-		want     bool
-		globbing bool
-	}{
-		{
-			query: "repo:foo",
-			want:  false,
-		},
-		{
-			query: "repo:foo@bar",
-			want:  false,
-		},
-		{
-			query: "repo:foo@*ref/tags",
-			want:  true,
-		},
-		{
-			query: "repo:foo@*!refs/tags",
-			want:  true,
-		},
-		{
-			query: "repo:foo@bar:*refs/heads",
-			want:  true,
-		},
-		{
-			query: "repo:foo@refs/tags/v3.14.3",
-			want:  false,
-		},
-		{
-			query: "repo:foo@*refs/tags/v3.14.?",
-			want:  true,
-		},
-		{
-			query:    "repo:*foo*@v3.14.3",
-			globbing: true,
-			want:     false,
-		},
-		{
-			query: "repo:foo@v3.14.3 repo:foo@*refs/tags/v3.14.* bar",
-			want:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.query, func(t *testing.T) {
-			qInfo, err := query.ProcessAndOr(tt.query, query.ParserOptions{SearchType: query.SearchTypeLiteral, Globbing: tt.globbing})
-			if err != nil {
-				t.Error(err)
-			}
-			got := containsRefGlobs(qInfo)
-			if got != tt.want {
-				t.Errorf("got %t, expected %t", got, tt.want)
-			}
-		})
-	}
 }
 
 func TestContextWithoutDeadline(t *testing.T) {
@@ -1127,4 +1109,33 @@ func TestContextWithoutDeadline_cancel(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("expected context to be done")
 	}
+}
+
+func TestBufferedSender(t *testing.T) {
+	// We create an unbuffered Sender, which means a call to Send blocks if there is
+	// no consumer.
+	c := make(chan *zoekt.SearchResult)
+	defer close(c)
+	unbufferedMockSender := searchbackend.ZoektStreamFunc(func(event *zoekt.SearchResult) {
+		c <- event
+	})
+
+	// We add a buffer to unbufferedMockSender. A call to Send should not block anymore.
+	bufferedMockSender, cleanup := bufferedSender(1, unbufferedMockSender)
+	defer cleanup()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Should not block.
+		bufferedMockSender.Send(&zoekt.SearchResult{Files: generateZoektMatches(1)})
+
+	}()
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Errorf("bufferedMockSender.Send did not return in time")
+	}
+	// Drain the buffer to make sure that cleanup() can return.
+	<-c
 }

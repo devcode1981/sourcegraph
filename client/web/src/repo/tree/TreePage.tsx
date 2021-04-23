@@ -1,54 +1,57 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { subYears, formatISO } from 'date-fns'
 import * as H from 'history'
 import FolderIcon from 'mdi-react/FolderIcon'
 import HistoryIcon from 'mdi-react/HistoryIcon'
+import SettingsIcon from 'mdi-react/SettingsIcon'
 import SourceBranchIcon from 'mdi-react/SourceBranchIcon'
 import SourceCommitIcon from 'mdi-react/SourceCommitIcon'
 import SourceRepositoryIcon from 'mdi-react/SourceRepositoryIcon'
 import TagIcon from 'mdi-react/TagIcon'
 import UserIcon from 'mdi-react/UserIcon'
-import React, { useState, useMemo, useCallback, useEffect } from 'react'
+import React, { useState, useMemo, useCallback, useEffect, useContext } from 'react'
 import { Link, Redirect } from 'react-router-dom'
-import { Observable, EMPTY } from 'rxjs'
-import { catchError, map } from 'rxjs/operators'
-import { ActionItem } from '../../../../shared/src/actions/ActionItem'
-import { ActionsContainer } from '../../../../shared/src/actions/ActionsContainer'
-import { ContributableMenu, ContributableViewContainer } from '../../../../shared/src/api/protocol'
-import { ActivationProps } from '../../../../shared/src/components/activation/Activation'
-import { displayRepoName } from '../../../../shared/src/components/RepoFileLink'
-import { ExtensionsControllerProps } from '../../../../shared/src/extensions/controller'
-import { gql, dataOrThrowErrors } from '../../../../shared/src/graphql/graphql'
-import * as GQL from '../../../../shared/src/graphql/schema'
-import { PlatformContextProps } from '../../../../shared/src/platform/context'
-import { SettingsCascadeProps } from '../../../../shared/src/settings/settings'
-import { asError, ErrorLike, isErrorLike } from '../../../../shared/src/util/errors'
-import { memoizeObservable } from '../../../../shared/src/util/memoizeObservable'
+import { Observable, EMPTY, from } from 'rxjs'
+import { catchError, map, switchMap } from 'rxjs/operators'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { ActionItem } from '@sourcegraph/shared/src/actions/ActionItem'
+import { ActionsContainer } from '@sourcegraph/shared/src/actions/ActionsContainer'
+import { wrapRemoteObservable } from '@sourcegraph/shared/src/api/client/api/common'
+import { FileDecorationsByPath } from '@sourcegraph/shared/src/api/extension/extensionHostApi'
+import { ContributableMenu } from '@sourcegraph/shared/src/api/protocol'
+import { ActivationProps } from '@sourcegraph/shared/src/components/activation/Activation'
+import { displayRepoName } from '@sourcegraph/shared/src/components/RepoFileLink'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { gql, dataOrThrowErrors } from '@sourcegraph/shared/src/graphql/graphql'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { VersionContextProps } from '@sourcegraph/shared/src/search/util'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { asError, ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { memoizeObservable } from '@sourcegraph/shared/src/util/memoizeObservable'
+import { pluralize } from '@sourcegraph/shared/src/util/strings'
+import { encodeURIPathComponent, toPrettyBlobURL, toURIWithPath } from '@sourcegraph/shared/src/util/url'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
+
+import { getFileDecorations } from '../../backend/features'
 import { queryGraphQL } from '../../backend/graphql'
+import { ErrorAlert } from '../../components/alerts'
+import { BreadcrumbSetters } from '../../components/Breadcrumbs'
 import { FilteredConnection } from '../../components/FilteredConnection'
 import { PageTitle } from '../../components/PageTitle'
-import { PatternTypeProps, CaseSensitivityProps, CopyQueryButtonProps } from '../../search'
+import { GitCommitFields, Scalars, TreePageRepositoryFields } from '../../graphql-operations'
+import { InsightsApiContext, InsightsViewGrid } from '../../insights'
+import { Settings } from '../../schema/settings.schema'
+import { PatternTypeProps, CaseSensitivityProps, CopyQueryButtonProps, SearchContextProps } from '../../search'
 import { basename } from '../../util/path'
 import { fetchTreeEntries } from '../backend'
 import { GitCommitNode, GitCommitNodeProps } from '../commits/GitCommitNode'
 import { gitCommitFragment } from '../commits/RepositoryCommitsPage'
-import { ThemeProps } from '../../../../shared/src/theme'
-import { ErrorAlert } from '../../components/alerts'
-import { subYears, formatISO } from 'date-fns'
-import { pluralize } from '../../../../shared/src/util/strings'
-import { useObservable } from '../../../../shared/src/util/useObservable'
-import { encodeURIPathComponent, toPrettyBlobURL, toURIWithPath } from '../../../../shared/src/util/url'
-import { getViewsForContainer } from '../../../../shared/src/api/client/services/viewService'
-import { Settings } from '../../schema/settings.schema'
-import { ViewGrid } from './ViewGrid'
-import { VersionContextProps } from '../../../../shared/src/search/util'
-import { BreadcrumbSetters } from '../../components/Breadcrumbs'
 import { FilePathBreadcrumbs } from '../FilePathBreadcrumbs'
-import { TelemetryProps } from '../../../../shared/src/telemetry/telemetryService'
+
 import { TreeEntriesSection } from './TreeEntriesSection'
-import { GitCommitFields, Scalars, TreePageRepositoryFields } from '../../graphql-operations'
-import { getFileDecorations } from '../../backend/features'
-import { FileDecorationsByPath } from '../../../../shared/src/api/extension/flatExtensionApi'
-import SettingsIcon from 'mdi-react/SettingsIcon'
 
 const fetchTreeCommits = memoizeObservable(
     (args: {
@@ -109,6 +112,7 @@ interface Props
         CaseSensitivityProps,
         CopyQueryButtonProps,
         VersionContextProps,
+        Pick<SearchContextProps, 'selectedSearchContextSpec'>,
         BreadcrumbSetters {
     repo: TreePageRepositoryFields
     /** The tree's path in TreePage. We call it filePath for consistency elsewhere. */
@@ -210,48 +214,81 @@ export const TreePage: React.FunctionComponent<Props> = ({
             )
         ) ?? {}
 
-    const { services } = props.extensionsController
-
-    const codeInsightsEnabled =
-        !isErrorLike(settingsCascade.final) && !!settingsCascade.final?.experimentalFeatures?.codeInsights
+    const showCodeInsights =
+        !isErrorLike(settingsCascade.final) &&
+        !!settingsCascade.final?.experimentalFeatures?.codeInsights &&
+        settingsCascade.final['insights.displayLocation.directory'] !== false
 
     // Add DirectoryViewer
     const uri = toURIWithPath({ repoName: repo.name, commitID, filePath })
     useEffect(() => {
-        if (!codeInsightsEnabled) {
+        if (!showCodeInsights) {
             return
         }
-        const viewerId = services.viewer.addViewer({
-            type: 'DirectoryViewer',
-            isActive: true,
-            resource: uri,
-        })
-        return () => services.viewer.removeViewer(viewerId)
-    }, [services.viewer, services.model, uri, codeInsightsEnabled])
+
+        const viewerIdPromise = props.extensionsController.extHostAPI
+            .then(extensionHostAPI =>
+                extensionHostAPI.addViewerIfNotExists({
+                    type: 'DirectoryViewer',
+                    isActive: true,
+                    resource: uri,
+                })
+            )
+            .catch(error => {
+                console.error('Error adding viewer to extension host:', error)
+                return null
+            })
+
+        return () => {
+            Promise.all([props.extensionsController.extHostAPI, viewerIdPromise])
+                .then(([extensionHostAPI, viewerId]) => {
+                    if (viewerId) {
+                        return extensionHostAPI.removeViewer(viewerId)
+                    }
+                    return
+                })
+                .catch(error => console.error('Error removing viewer from extension host:', error))
+        }
+    }, [uri, showCodeInsights, props.extensionsController])
 
     // Observe directory views
-    const workspaceUri = services.workspace.roots.value[0]?.uri
+    const workspaceUri = useObservable(
+        useMemo(
+            () =>
+                from(props.extensionsController.extHostAPI).pipe(
+                    switchMap(extensionHostAPI => wrapRemoteObservable(extensionHostAPI.getWorkspaceRoots())),
+                    map(workspaceRoots => workspaceRoots[0]?.uri)
+                ),
+            [props.extensionsController]
+        )
+    )
+
+    const { getCombinedViews } = useContext(InsightsApiContext)
     const views = useObservable(
         useMemo(
             () =>
-                codeInsightsEnabled && workspaceUri
-                    ? getViewsForContainer(
-                          ContributableViewContainer.Directory,
-                          {
-                              viewer: {
-                                  type: 'DirectoryViewer',
-                                  directory: {
-                                      uri,
-                                  },
-                              },
-                              workspace: {
-                                  uri: workspaceUri,
-                              },
-                          },
-                          services.view
+                showCodeInsights && workspaceUri
+                    ? getCombinedViews(() =>
+                          from(props.extensionsController.extHostAPI).pipe(
+                              switchMap(extensionHostAPI =>
+                                  wrapRemoteObservable(
+                                      extensionHostAPI.getDirectoryViews({
+                                          viewer: {
+                                              type: 'DirectoryViewer',
+                                              directory: {
+                                                  uri,
+                                              },
+                                          },
+                                          workspace: {
+                                              uri: workspaceUri,
+                                          },
+                                      })
+                                  )
+                              )
+                          )
                       )
                     : EMPTY,
-            [codeInsightsEnabled, workspaceUri, uri, services.view]
+            [getCombinedViews, showCodeInsights, workspaceUri, uri, props.extensionsController]
         )
     )
 
@@ -321,7 +358,7 @@ export const TreePage: React.FunctionComponent<Props> = ({
                 /not a directory/i.test(treeOrError.message) ? (
                     <Redirect to={toPrettyBlobURL({ repoName: repo.name, revision, commitID, filePath })} />
                 ) : (
-                    <ErrorAlert error={treeOrError} history={props.history} />
+                    <ErrorAlert error={treeOrError} />
                 )
             ) : (
                 <>
@@ -383,7 +420,7 @@ export const TreePage: React.FunctionComponent<Props> = ({
                         )}
                     </header>
                     {views && (
-                        <ViewGrid
+                        <InsightsViewGrid
                             {...props}
                             className="tree-page__section"
                             views={views}
@@ -401,11 +438,8 @@ export const TreePage: React.FunctionComponent<Props> = ({
                             isLightTheme={props.isLightTheme}
                         />
                     </section>
-                    {/* eslint-disable react/jsx-no-bind */}
-                    <ActionsContainer
-                        {...props}
-                        menu={ContributableMenu.DirectoryPage}
-                        render={items => (
+                    <ActionsContainer {...props} menu={ContributableMenu.DirectoryPage} empty={null}>
+                        {items => (
                             <section className="tree-page__section">
                                 <h3 className="tree-page__section-header">Actions</h3>
                                 {items.map(item => (
@@ -418,8 +452,7 @@ export const TreePage: React.FunctionComponent<Props> = ({
                                 ))}
                             </section>
                         )}
-                        empty={null}
-                    />
+                    </ActionsContainer>
                     {/* eslint-enable react/jsx-no-bind */}
                     <div className="tree-page__section">
                         <h3 className="tree-page__section-header">Changes</h3>

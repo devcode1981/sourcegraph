@@ -1,9 +1,11 @@
 import React from 'react'
 import { Redirect } from 'react-router'
+
+import { isErrorLike } from '@sourcegraph/shared/src/util/errors'
+
 import { LayoutRouteProps, routes } from '../routes'
-import { lazyComponent } from '../util/lazyComponent'
-import { isErrorLike } from '../../../shared/src/util/errors'
 import { Settings } from '../schema/settings.schema'
+import { lazyComponent } from '../util/lazyComponent'
 
 export const enterpriseRoutes: readonly LayoutRouteProps<{}>[] = [
     {
@@ -24,8 +26,12 @@ export const enterpriseRoutes: readonly LayoutRouteProps<{}>[] = [
     },
     {
         path: '/campaigns',
-        render: lazyComponent(() => import('./campaigns/global/GlobalCampaignsArea'), 'GlobalCampaignsArea'),
-        condition: props => props.showCampaigns,
+        render: ({ match }) => <Redirect to={match.path.replace('/campaigns', '/batch-changes')} />,
+    },
+    {
+        path: '/batch-changes',
+        render: lazyComponent(() => import('./batches/global/GlobalBatchChangesArea'), 'GlobalBatchChangesArea'),
+        condition: props => props.showBatchChanges,
     },
     {
         path: '/stats',
@@ -44,9 +50,6 @@ export const enterpriseRoutes: readonly LayoutRouteProps<{}>[] = [
             () => import('./code-monitoring/global/GlobalCodeMonitoringArea'),
             'GlobalCodeMonitoringArea'
         ),
-        condition: props =>
-            !isErrorLike(props.settingsCascade.final) &&
-            !!props.settingsCascade.final?.experimentalFeatures?.codeMonitoring,
     },
     ...routes,
 ]

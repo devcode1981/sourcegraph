@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"unicode"
 
 	"github.com/sourcegraph/sourcegraph/internal/lazyregexp"
 )
@@ -24,8 +23,7 @@ func SubstituteAliases(searchType SearchType) func(nodes []Node) []Node {
 		"msg":      FieldMessage,
 		"revision": FieldRev,
 	}
-	var mapper func(nodes []Node) []Node
-	mapper = func(nodes []Node) []Node {
+	mapper := func(nodes []Node) []Node {
 		return MapParameter(nodes, func(field, value string, negated bool, annotation Annotation) Node {
 			if field == "content" {
 				if searchType == SearchTypeRegex {
@@ -48,6 +46,16 @@ func SubstituteAliases(searchType SearchType) func(nodes []Node) []Node {
 func LowercaseFieldNames(nodes []Node) []Node {
 	return MapParameter(nodes, func(field, value string, negated bool, annotation Annotation) Node {
 		return Parameter{Field: strings.ToLower(field), Value: value, Negated: negated, Annotation: annotation}
+	})
+}
+
+// SubstituteCountAll replaces count:all with count:99999999.
+func SubstituteCountAll(nodes []Node) []Node {
+	return MapParameter(nodes, func(field, value string, negated bool, annotation Annotation) Node {
+		if field == FieldCount && strings.ToLower(value) == "all" {
+			return Parameter{Field: field, Value: "99999999", Negated: negated, Annotation: annotation}
+		}
+		return Parameter{Field: field, Value: value, Negated: negated, Annotation: annotation}
 	})
 }
 
@@ -252,8 +260,8 @@ func fuzzifyGlobPattern(value string) string {
 	return "**" + value + "**"
 }
 
-// mapGlobToRegex translates glob to regexp for fields repo, file, and repohasfile.
-func mapGlobToRegex(nodes []Node) ([]Node, error) {
+// Globbing translates glob to regexp for fields repo, file, and repohasfile.
+func Globbing(nodes []Node) ([]Node, error) {
 	var globErrors []globError
 
 	nodes = MapParameter(nodes, func(field, value string, negated bool, annotation Annotation) Node {
@@ -289,6 +297,24 @@ func mapGlobToRegex(nodes []Node) ([]Node, error) {
 	return nodes, nil
 }
 
+func ToNodes(parameters []Parameter) []Node {
+	nodes := make([]Node, 0, len(parameters))
+	for _, p := range parameters {
+		nodes = append(nodes, p)
+	}
+	return nodes
+}
+
+// Converts a flat list of nodes to parameters. Invariant: nodes are parameters.
+// This function is intended for internal use only, which assumes the invariant.
+func toParameters(nodes []Node) []Parameter {
+	var parameters []Parameter
+	for _, n := range nodes {
+		parameters = append(parameters, n.(Parameter))
+	}
+	return parameters
+}
+
 // Hoist is a heuristic that rewrites simple but possibly ambiguous queries. It
 // changes certain expressions in a way that some consider to be more natural.
 // For example, the following query without parentheses is interpreted as
@@ -319,7 +345,7 @@ func Hoist(nodes []Node) ([]Node, error) {
 
 	n := len(expression.Operands)
 	var pattern []Node
-	var scopeParameters []Node
+	var scopeParameters []Parameter
 	for i, node := range expression.Operands {
 		if i == 0 || i == n-1 {
 			scopePart, patternPart, err := PartitionSearchPattern([]Node{node})
@@ -339,31 +365,7 @@ func Hoist(nodes []Node) ([]Node, error) {
 		annotation.Labels |= HeuristicHoisted
 		return Pattern{Value: value, Negated: negated, Annotation: annotation}
 	})
-	return append(scopeParameters, newOperator(pattern, expression.Kind)...), nil
-}
-
-// SearchUppercase adds case:yes to queries if any pattern is mixed-case.
-func SearchUppercase(nodes []Node) []Node {
-	var foundMixedCase bool
-	VisitPattern(nodes, func(value string, _ bool, _ Annotation) {
-		if match := containsUppercase(value); match {
-			foundMixedCase = true
-		}
-	})
-	if foundMixedCase {
-		nodes = append(nodes, Parameter{Field: "case", Value: "yes"})
-		return newOperator(nodes, And)
-	}
-	return nodes
-}
-
-func containsUppercase(s string) bool {
-	for _, r := range s {
-		if unicode.IsUpper(r) && unicode.IsLetter(r) {
-			return true
-		}
-	}
-	return false
+	return append(ToNodes(scopeParameters), newOperator(pattern, expression.Kind)...), nil
 }
 
 // partition partitions nodes into left and right groups. A node is put in the
@@ -473,13 +475,15 @@ func substituteOrForRegexp(nodes []Node) []Node {
 	return newNode
 }
 
+// fuzzyRegexp interpolates patterns with .*? regular expressions and
+// concatenates them. Invariant: len(patterns) > 0.
 func fuzzyRegexp(patterns []Pattern) Pattern {
 	if len(patterns) == 1 {
 		return patterns[0]
 	}
 	var values []string
 	for _, p := range patterns {
-		if p.Annotation.Labels.isSet(Literal) {
+		if p.Annotation.Labels.IsSet(Literal) {
 			values = append(values, regexp.QuoteMeta(p.Value))
 		} else {
 			values = append(values, p.Value)
@@ -491,6 +495,8 @@ func fuzzyRegexp(patterns []Pattern) Pattern {
 	}
 }
 
+// fuzzyRegexp interpolates patterns with spaces and concatenates them.
+// Invariant: len(patterns) > 0.
 func space(patterns []Pattern) Pattern {
 	if len(patterns) == 1 {
 		return patterns[0]
@@ -499,8 +505,12 @@ func space(patterns []Pattern) Pattern {
 	for _, p := range patterns {
 		values = append(values, p.Value)
 	}
+
 	return Pattern{
-		Value: strings.Join(values, " "),
+		// Preserve labels based on first pattern. Required to
+		// distinguish quoted, literal, structural pattern labels.
+		Annotation: patterns[0].Annotation,
+		Value:      strings.Join(values, " "),
 	}
 }
 
@@ -625,7 +635,7 @@ func escapeParens(s string) string {
 // escapeParensHeuristic escapes certain parentheses in search patterns (see escapeParens).
 func escapeParensHeuristic(nodes []Node) []Node {
 	return MapPattern(nodes, func(value string, negated bool, annotation Annotation) Node {
-		if !annotation.Labels.isSet(Quoted) {
+		if !annotation.Labels.IsSet(Quoted) {
 			value = escapeParens(value)
 		}
 		return Pattern{
@@ -653,23 +663,24 @@ func FuzzifyRegexPatterns(nodes []Node) []Node {
 	})
 }
 
-// concatRevFilters removes rev: filters from []Node and attaches their value as @rev to the repo: filters.
-// Invariant: Guaranteed to succeed on a validated and DNF query.
-func ConcatRevFilters(nodes []Node) []Node {
+// concatRevFilters removes rev: filters from parameters and attaches their value as @rev to the repo: filters.
+// Invariant: Guaranteed to succeed on a validat Basic query.
+func ConcatRevFilters(b Basic) Basic {
 	var revision string
-	nodes = MapField(nodes, FieldRev, func(value string, _ bool) Node {
+	nodes := MapField(ToNodes(b.Parameters), FieldRev, func(value string, _ bool) Node {
 		revision = value
 		return nil // remove this node
 	})
 	if revision == "" {
-		return nodes
+		return b
 	}
-	return MapField(nodes, FieldRepo, func(value string, negated bool) Node {
+	modified := MapField(nodes, FieldRepo, func(value string, negated bool) Node {
 		if !negated {
 			return Parameter{Value: value + "@" + revision, Field: FieldRepo, Negated: negated}
 		}
 		return Parameter{Value: value, Field: FieldRepo, Negated: negated}
 	})
+	return Basic{Parameters: toParameters(modified), Pattern: b.Pattern}
 }
 
 // labelStructural converts Literal labels to Structural labels. Structural
@@ -696,4 +707,79 @@ func ellipsesForHoles(nodes []Node) []Node {
 			Annotation: annotation,
 		}
 	})
+}
+
+func OverrideField(nodes []Node, field, value string) []Node {
+	// First remove any fields that exist.
+	nodes = MapField(nodes, field, func(_ string, _ bool) Node {
+		return nil
+	})
+	return newOperator(append(nodes, Parameter{Field: field, Value: value}), And)
+}
+
+// OmitField removes all fields `field` from a query. The `field` string
+// should be the canonical name and not an alias ("repo", not "r").
+func OmitField(q Q, field string) string {
+	return StringHuman(MapField(q, field, func(_ string, _ bool) Node {
+		return nil
+	}))
+}
+
+// addRegexpField adds a new expr to the query with the given field and pattern
+// value. The nonnegated field is assumed to associate with a regexp value. The
+// pattern value is assumed to be unquoted.
+//
+// It tries to remove redundancy in the result. For example, given
+// a query like "x:foo", if given a field "x" with pattern "foobar" to add,
+// it will return a query "x:foobar" instead of "x:foo x:foobar". It is not
+// guaranteed to always return the simplest query.
+func AddRegexpField(q Q, field, pattern string) string {
+	var modified bool
+	q = MapParameter(q, func(gotField, value string, negated bool, annotation Annotation) Node {
+		if field == gotField && strings.Contains(pattern, value) {
+			value = pattern
+			modified = true
+		}
+		return Parameter{
+			Field:      gotField,
+			Value:      value,
+			Negated:    negated,
+			Annotation: annotation,
+		}
+	})
+
+	if !modified {
+		// use newOperator to reduce And nodes when adding a parameter to the query toplevel.
+		q = newOperator(append(q, Parameter{Field: field, Value: pattern}), And)
+	}
+	return StringHuman(q)
+}
+
+func identity(nodes []Node) ([]Node, error) {
+	return nodes, nil
+}
+
+// Converts a parse tree to a basic query by attempting to obtain a valid partition.
+func ToBasicQuery(nodes []Node) (Basic, error) {
+	parameters, pattern, err := PartitionSearchPattern(nodes)
+	if err != nil {
+		return Basic{}, err
+	}
+	return Basic{Parameters: parameters, Pattern: pattern}, nil
+}
+
+// Identity is the identity transformer for basic queries.
+func Identity(b Basic) Basic {
+	return b
+}
+
+// PatternToFile transforms a search query such that `file:` is prefixed to the
+// pattern. This transformation is used for generating suggestions. Succeeds
+// only when the pattern expression is an atom.
+func PatternToFile(b Basic) Basic {
+	if p, ok := b.Pattern.(Pattern); ok && !p.Negated {
+		b.Parameters = append(b.Parameters, Parameter{Field: "file", Value: p.Value})
+		return b
+	}
+	return b
 }

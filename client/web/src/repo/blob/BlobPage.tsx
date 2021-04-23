@@ -1,46 +1,42 @@
 import * as H from 'history'
 import AlertCircleIcon from 'mdi-react/AlertCircleIcon'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { Redirect } from 'react-router'
 import { Observable } from 'rxjs'
 import { catchError, map, mapTo, startWith, switchMap } from 'rxjs/operators'
-import { ExtensionsControllerProps } from '../../../../shared/src/extensions/controller'
-import { gql, dataOrThrowErrors } from '../../../../shared/src/graphql/graphql'
-import * as GQL from '../../../../shared/src/graphql/schema'
-import { PlatformContextProps } from '../../../../shared/src/platform/context'
-import { SettingsCascadeProps } from '../../../../shared/src/settings/settings'
-import { ErrorLike, isErrorLike, asError } from '../../../../shared/src/util/errors'
-import { memoizeObservable } from '../../../../shared/src/util/memoizeObservable'
-import {
-    AbsoluteRepoFile,
-    lprToRange,
-    makeRepoURI,
-    ModeSpec,
-    ParsedRepoURI,
-    parseHash,
-} from '../../../../shared/src/util/url'
+
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { Scalars } from '@sourcegraph/shared/src/graphql-operations'
+import { gql, dataOrThrowErrors } from '@sourcegraph/shared/src/graphql/graphql'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { ErrorLike, isErrorLike, asError } from '@sourcegraph/shared/src/util/errors'
+import { memoizeObservable } from '@sourcegraph/shared/src/util/memoizeObservable'
+import { AbsoluteRepoFile, makeRepoURI, ModeSpec, ParsedRepoURI, parseHash } from '@sourcegraph/shared/src/util/url'
+import { useEventObservable } from '@sourcegraph/shared/src/util/useObservable'
+
+import { AuthenticatedUser } from '../../auth'
 import { queryGraphQL } from '../../backend/graphql'
+import { ErrorMessage } from '../../components/alerts'
+import { BreadcrumbSetters } from '../../components/Breadcrumbs'
 import { HeroPage } from '../../components/HeroPage'
 import { PageTitle } from '../../components/PageTitle'
+import { toTreeURL } from '../../util/url'
+import { FilePathBreadcrumbs } from '../FilePathBreadcrumbs'
+import { HoverThresholdProps } from '../RepoContainer'
 import { RepoHeaderContributionsLifecycleProps } from '../RepoHeader'
 import { RepoHeaderContributionPortal } from '../RepoHeaderContributionPortal'
+
 import { ToggleHistoryPanel } from './actions/ToggleHistoryPanel'
 import { ToggleLineWrap } from './actions/ToggleLineWrap'
 import { ToggleRenderedFileMode } from './actions/ToggleRenderedFileMode'
 import { Blob, BlobInfo } from './Blob'
-import { BlobPanel } from './panel/BlobPanel'
 import { GoToRawAction } from './GoToRawAction'
+import { useBlobPanelViews } from './panel/BlobPanel'
 import { RenderedFile } from './RenderedFile'
-import { ThemeProps } from '../../../../shared/src/theme'
-import { ErrorMessage } from '../../components/alerts'
-import { Redirect } from 'react-router'
-import { toTreeURL } from '../../util/url'
-import { BreadcrumbSetters } from '../../components/Breadcrumbs'
-import { useEventObservable } from '../../../../shared/src/util/useObservable'
-import { FilePathBreadcrumbs } from '../FilePathBreadcrumbs'
-import { AuthenticatedUser } from '../../auth'
-import { TelemetryProps } from '../../../../shared/src/telemetry/telemetryService'
-import { HoverThresholdProps } from '../RepoContainer'
-import { Scalars } from '../../../../shared/src/graphql-operations'
 
 function fetchBlobCacheKey(parsed: ParsedRepoURI & { isLightTheme: boolean; disableTimeout: boolean }): string {
     return makeRepoURI(parsed) + String(parsed.isLightTheme) + String(parsed.disableTimeout)
@@ -205,10 +201,7 @@ export const BlobPage: React.FunctionComponent<Props> = props => {
         return `${repoString}`
     }
 
-    // Clear the Sourcegraph extensions model's component when the blob is no longer shown.
-    useEffect(() => () => props.extensionsController.services.viewer.removeAllViewers(), [
-        props.extensionsController.services.viewer,
-    ])
+    useBlobPanelViews(props)
 
     // If url explicitly asks for a certain rendering mode, renderMode is set to that mode, else it checks:
     // - If file contains richHTML and url does not include a line number: We render in richHTML.
@@ -230,35 +223,44 @@ export const BlobPage: React.FunctionComponent<Props> = props => {
             <RepoHeaderContributionPortal
                 position="right"
                 priority={20}
-                element={
-                    <ToggleHistoryPanel key="toggle-blob-panel" location={props.location} history={props.history} />
-                }
+                id="toggle-blob-panel"
                 repoHeaderContributionsLifecycleProps={props.repoHeaderContributionsLifecycleProps}
-            />
+            >
+                {context => (
+                    <ToggleHistoryPanel
+                        {...context}
+                        key="toggle-blob-panel"
+                        location={props.location}
+                        history={props.history}
+                    />
+                )}
+            </RepoHeaderContributionPortal>
             {renderMode === 'code' && (
                 <RepoHeaderContributionPortal
                     position="right"
                     priority={99}
-                    element={<ToggleLineWrap key="toggle-line-wrap" onDidUpdate={setWrapCode} />}
+                    id="toggle-line-wrap"
                     repoHeaderContributionsLifecycleProps={props.repoHeaderContributionsLifecycleProps}
-                />
+                >
+                    {context => <ToggleLineWrap {...context} key="toggle-line-wrap" onDidUpdate={setWrapCode} />}
+                </RepoHeaderContributionPortal>
             )}
             <RepoHeaderContributionPortal
                 position="right"
                 priority={30}
-                element={
-                    <GoToRawAction key="raw-action" repoName={repoName} revision={props.revision} filePath={filePath} />
-                }
+                id="raw-action"
                 repoHeaderContributionsLifecycleProps={props.repoHeaderContributionsLifecycleProps}
-            />
-            <BlobPanel
-                {...props}
-                position={
-                    lprToRange(parseHash(props.location.hash))
-                        ? lprToRange(parseHash(props.location.hash))!.start
-                        : undefined
-                }
-            />
+            >
+                {context => (
+                    <GoToRawAction
+                        {...context}
+                        key="raw-action"
+                        repoName={repoName}
+                        revision={props.revision}
+                        filePath={filePath}
+                    />
+                )}
+            </RepoHeaderContributionPortal>
         </>
     )
 
@@ -273,11 +275,7 @@ export const BlobPage: React.FunctionComponent<Props> = props => {
         return (
             <>
                 {alwaysRender}
-                <HeroPage
-                    icon={AlertCircleIcon}
-                    title="Error"
-                    subtitle={<ErrorMessage error={blobInfoOrError} history={props.history} />}
-                />
+                <HeroPage icon={AlertCircleIcon} title="Error" subtitle={<ErrorMessage error={blobInfoOrError} />} />
             </>
         )
     }
@@ -294,15 +292,18 @@ export const BlobPage: React.FunctionComponent<Props> = props => {
                 <RepoHeaderContributionPortal
                     position="right"
                     priority={100}
-                    element={
+                    id="toggle-rendered-file-mode"
+                    repoHeaderContributionsLifecycleProps={props.repoHeaderContributionsLifecycleProps}
+                >
+                    {context => (
                         <ToggleRenderedFileMode
                             key="toggle-rendered-file-mode"
                             mode={renderMode || 'rendered'}
                             location={props.location}
+                            {...context}
                         />
-                    }
-                    repoHeaderContributionsLifecycleProps={props.repoHeaderContributionsLifecycleProps}
-                />
+                    )}
+                </RepoHeaderContributionPortal>
             )}
             {blobInfoOrError.richHTML && renderMode === 'rendered' && (
                 <RenderedFile

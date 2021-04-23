@@ -1,9 +1,11 @@
-import React from 'react'
 import { storiesOf } from '@storybook/react'
-import { WebStory } from './WebStory'
-import { Timeline } from './Timeline'
+import { parseISO } from 'date-fns'
 import CheckIcon from 'mdi-react/CheckIcon'
 import ErrorIcon from 'mdi-react/ErrorIcon'
+import React from 'react'
+
+import { Timeline } from './Timeline'
+import { WebStory } from './WebStory'
 
 const { add } = storiesOf('web/Timeline', module)
 
@@ -13,6 +15,7 @@ add('Basic', () => (
     <WebStory>
         {() => (
             <Timeline
+                now={() => parseISO('2020-08-01T16:21:00+00:00')}
                 stages={[
                     {
                         icon: <CheckIcon />,
@@ -54,6 +57,7 @@ add('Details', () => (
     <WebStory>
         {() => (
             <Timeline
+                now={() => parseISO('2020-08-01T16:21:00+00:00')}
                 stages={[
                     {
                         icon: <CheckIcon />,

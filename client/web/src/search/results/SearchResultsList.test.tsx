@@ -1,23 +1,24 @@
+import { cleanup, getAllByTestId, getByTestId, queryByTestId, render } from '@testing-library/react'
 import { createBrowserHistory } from 'history'
 import { range } from 'lodash'
 import * as React from 'react'
 import { BrowserRouter } from 'react-router-dom'
-import { cleanup, getAllByTestId, getByTestId, queryByTestId, render } from '@testing-library/react'
 import _VisibilitySensor from 'react-visibility-sensor'
+import { NEVER, of } from 'rxjs'
 import sinon from 'sinon'
-import * as GQL from '../../../../shared/src/graphql/schema'
-import { NOOP_TELEMETRY_SERVICE } from '../../../../shared/src/telemetry/telemetryService'
+
+import { SearchPatternType } from '@sourcegraph/shared/src/graphql-operations'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { NOOP_TELEMETRY_SERVICE } from '@sourcegraph/shared/src/telemetry/telemetryService'
 import {
     extensionsController,
     HIGHLIGHTED_FILE_LINES_REQUEST,
     MULTIPLE_SEARCH_REQUEST,
     RESULT,
     SEARCH_REQUEST,
-} from '../../../../shared/src/util/searchTestHelpers'
+} from '@sourcegraph/shared/src/util/searchTestHelpers'
+
 import { SearchResultsList, SearchResultsListProps } from './SearchResultsList'
-import { NEVER, of } from 'rxjs'
-import { FiltersToTypeAndValue, FilterType } from '../../../../shared/src/search/interactive/util'
-import { SearchPatternType } from '../../../../shared/src/graphql-operations'
 
 let VISIBILITY_CHANGED_CALLBACKS: ((isVisible: boolean) => void)[] = []
 
@@ -109,24 +110,22 @@ describe('SearchResultsList', () => {
             subjects: null,
             final: null,
         },
-        extensionsController: { executeCommand: sinon.spy(), services: extensionsController.services },
+        extensionsController: { executeCommand: sinon.spy(), extHostAPI: extensionsController.extHostAPI },
         platformContext: { forceUpdateTooltip: sinon.spy(), settings: NEVER },
         telemetryService: NOOP_TELEMETRY_SERVICE,
+        parsedSearchQuery: 'r:golang/oauth2 test f:travis',
         patternType: SearchPatternType.regexp,
         setPatternType: sinon.spy(),
         caseSensitive: false,
         setCaseSensitivity: sinon.spy(),
 
-        interactiveSearchMode: false,
-        filtersInQuery: {},
-        toggleSearchMode: sinon.fake(),
-        onFiltersInQueryChange: sinon.fake(),
-        splitSearchModes: false,
         versionContext: undefined,
+        selectedSearchContextSpec: 'global',
 
-        navbarSearchQueryState: { query: '', cursorPosition: 0 },
+        navbarSearchQueryState: { query: '' },
 
         shouldDisplayPerformanceWarning: () => of(false),
+        enableCodeMonitoring: false,
     }
 
     it('displays loading text when results is undefined', () => {
@@ -136,7 +135,7 @@ describe('SearchResultsList', () => {
             </BrowserRouter>
         )
 
-        expect(queryByTestId(container, 'loading-container')).toBeTruthy()
+        expect(queryByTestId(container, 'loading-container')).toBeVisible()
     })
 
     it('shows error message when the search GraphQL request returns an error', () => {
@@ -145,7 +144,7 @@ describe('SearchResultsList', () => {
                 <SearchResultsList {...defaultProps} resultsOrError={{ message: 'test error', name: 'TestError' }} />
             </BrowserRouter>
         )
-        expect(getByTestId(container, 'search-results-list-error')).toBeTruthy()
+        expect(getByTestId(container, 'search-results-list-error')).toBeVisible()
     })
 
     it('renders the search results info bar when there are results', () => {
@@ -154,7 +153,7 @@ describe('SearchResultsList', () => {
                 <SearchResultsList {...defaultProps} />
             </BrowserRouter>
         )
-        expect(getByTestId(container, 'results-info-bar')).toBeTruthy()
+        expect(getByTestId(container, 'results-info-bar')).toBeVisible()
     })
 
     it('renders one search result', () => {
@@ -163,7 +162,7 @@ describe('SearchResultsList', () => {
                 <SearchResultsList {...defaultProps} />
             </BrowserRouter>
         )
-        expect(getByTestId(container, 'result-container')).toBeTruthy()
+        expect(getByTestId(container, 'result-container')).toBeVisible()
         expect(getAllByTestId(container, 'result-container').length).toBe(1)
     })
 
@@ -173,8 +172,8 @@ describe('SearchResultsList', () => {
                 <SearchResultsList {...defaultProps} />
             </BrowserRouter>
         )
-        expect(queryByTestId(container, 'loading-container')).toBeFalsy()
-        expect(queryByTestId(container, 'search-results-list-error')).toBeFalsy()
+        expect(queryByTestId(container, 'loading-container')).not.toBeInTheDocument()
+        expect(queryByTestId(container, 'search-results-list-error')).not.toBeInTheDocument()
     })
 
     it('renders correct number of search results if there are multiple', () => {
@@ -203,7 +202,7 @@ describe('SearchResultsList', () => {
                 <SearchResultsList {...props} />
             </BrowserRouter>
         )
-        expect(getByTestId(container, 'search-show-more-button')).toBeTruthy()
+        expect(getByTestId(container, 'search-show-more-button')).toBeVisible()
     })
 
     it('does not display "Show More" if the limit isn\'t hit', () => {
@@ -269,7 +268,7 @@ describe('SearchResultsList', () => {
             </BrowserRouter>
         )
         scrollToBottom()
-        expect(getByTestId(container, 'search-show-more-button')).toBeTruthy()
+        expect(getByTestId(container, 'search-show-more-button')).toBeVisible()
     })
 
     it('does not add filters to query in search suggestions link', () => {
@@ -287,23 +286,9 @@ describe('SearchResultsList', () => {
             ],
         }
 
-        const filtersInQuery: FiltersToTypeAndValue = {
-            a: {
-                type: FilterType.repo,
-                value: 'test1',
-                editable: true,
-            },
-            b: {
-                type: FilterType.repo,
-                value: 'test2',
-                editable: true,
-            },
-        }
-
         const props = {
             ...defaultProps,
             resultsOrError,
-            filtersInQuery,
         }
 
         const { container } = render(
@@ -313,7 +298,7 @@ describe('SearchResultsList', () => {
         )
 
         const link = getByTestId(container, 'proposed-query-link') as HTMLAnchorElement
-        expect(link).toBeTruthy()
+        expect(link).toBeVisible()
         expect(link.href).toStrictEqual('http://localhost/search?q=repo:test1%7Ctest2&patternType=regexp')
     })
 
@@ -346,8 +331,8 @@ describe('SearchResultsList', () => {
         const link = getByTestId(container, 'proposed-query-link') as HTMLAnchorElement
         const result = getByTestId(container, 'result-container')
 
-        expect(link).toBeTruthy()
-        expect(result).toBeTruthy()
+        expect(link).toBeVisible()
+        expect(result).toBeVisible()
         expect(link.compareDocumentPosition(result)).toStrictEqual(link.DOCUMENT_POSITION_FOLLOWING)
     })
 })

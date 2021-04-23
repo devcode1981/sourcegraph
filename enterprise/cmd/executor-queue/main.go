@@ -10,9 +10,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/sourcegraph/sourcegraph/enterprise/cmd/executor-queue/internal/queues/codeintel"
-	"github.com/sourcegraph/sourcegraph/enterprise/internal/apiworker/apiserver"
+	apiserver "github.com/sourcegraph/sourcegraph/enterprise/cmd/executor-queue/internal/server"
 	"github.com/sourcegraph/sourcegraph/internal/conf"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbconn"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbconn"
 	"github.com/sourcegraph/sourcegraph/internal/debugserver"
 	"github.com/sourcegraph/sourcegraph/internal/env"
 	"github.com/sourcegraph/sourcegraph/internal/goroutine"
@@ -57,10 +57,16 @@ func main() {
 	}
 
 	// Start debug server
-	go debugserver.NewServerRoutine().Start()
+	ready := make(chan struct{})
+	go debugserver.NewServerRoutine(ready).Start()
 
 	// Connect to databases
 	db := connectToDatabase()
+
+	// Migrations may take a while, but after they're done we'll immediately
+	// spin up a server and can accept traffic. Inform external clients we'll
+	// be ready for traffic.
+	close(ready)
 
 	// Initialize queues
 	queueOptions := map[string]apiserver.QueueOptions{

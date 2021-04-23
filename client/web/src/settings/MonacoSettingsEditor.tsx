@@ -3,11 +3,13 @@ import * as monaco from 'monaco-editor/esm/vs/editor/editor.api'
 import * as React from 'react'
 import { Subject, Subscription } from 'rxjs'
 import { distinctUntilChanged, distinctUntilKeyChanged, map, startWith } from 'rxjs/operators'
+
+import { TelemetryService } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+
 import jsonSchemaMetaSchema from '../../../../schema/json-schema-draft-07.schema.json'
 import settingsSchema from '../../../../schema/settings.schema.json'
 import { MonacoEditor } from '../components/MonacoEditor'
-import { ThemeProps } from '../../../shared/src/theme'
-import { TelemetryService } from '../../../shared/src/telemetry/telemetryService'
 
 /**
  * Minimal shape of a JSON Schema. These values are treated as opaque, so more specific types are
@@ -142,6 +144,8 @@ export class MonacoSettingsEditor extends React.PureComponent<Props, State> {
                 }
             })
         }
+
+        this.disposables.push(registerRedactedHover(monaco))
 
         setDiagnosticsOptions(monaco, this.props)
 
@@ -291,6 +295,24 @@ function toMonacoEdits(
         forceMoveMarkers: true,
         text: edit.content,
     }))
+}
+
+function registerRedactedHover(editor: typeof monaco): monaco.IDisposable {
+    return editor.languages.registerHoverProvider('json', {
+        provideHover(model, position, token): monaco.languages.ProviderResult<monaco.languages.Hover> {
+            if (model.getWordAtPosition(position)?.word === 'REDACTED') {
+                return {
+                    contents: [
+                        {
+                            value:
+                                "**This field is redacted.** To update, replace with a new value. Otherwise, don't modify this field.",
+                        },
+                    ],
+                }
+            }
+            return { contents: [] }
+        },
+    })
 }
 
 /**

@@ -1,19 +1,21 @@
-import React, { useCallback, useState } from 'react'
-import { Form } from '../../../branded/src/components/Form'
-import { QueryInput } from '../search/input/QueryInput'
-import { CaseSensitivityProps, PatternTypeProps, CopyQueryButtonProps } from '../search'
-import { SearchButton } from '../search/input/SearchButton'
-import { SettingsCascadeProps } from '../../../shared/src/settings/settings'
-import { QueryState, submitSearch } from '../search/helpers'
 import * as H from 'history'
-import { VersionContextProps } from '../../../shared/src/search/util'
+import React, { useCallback, useState } from 'react'
+
+import { Form } from '@sourcegraph/branded/src/components/Form'
+import { VersionContextProps } from '@sourcegraph/shared/src/search/util'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+
+import { CaseSensitivityProps, PatternTypeProps, CopyQueryButtonProps, SearchContextProps } from '../search'
+import { submitSearch } from '../search/helpers'
+import { SearchButton } from '../search/input/SearchButton'
 
 interface Props
     extends SettingsCascadeProps,
         PatternTypeProps,
         CaseSensitivityProps,
         CopyQueryButtonProps,
-        VersionContextProps {
+        VersionContextProps,
+        Pick<SearchContextProps, 'selectedSearchContextSpec'> {
     implicitQueryPrefix: string
 
     location: H.Location
@@ -31,32 +33,27 @@ export const QueryInputInViewContent: React.FunctionComponent<Props> = ({
     settingsCascade,
     ...props
 }) => {
-    const [queryState, setQueryState] = useState<QueryState>({ query: '', cursorPosition: 0 })
-
+    const [query, setQuery] = useState<string>('')
+    const onQueryChange = useCallback(
+        (event: React.ChangeEvent<HTMLInputElement>): void => {
+            setQuery(event.target.value)
+        },
+        [setQuery]
+    )
     const onSubmit = useCallback(
         (event: React.FormEvent<HTMLFormElement>): void => {
             event.preventDefault()
             submitSearch({
                 ...props,
-                query: `${implicitQueryPrefix} ${queryState.query}`,
+                query: `${implicitQueryPrefix} ${query}`,
                 source: 'scopePage',
             })
         },
-        [implicitQueryPrefix, props, queryState.query]
+        [implicitQueryPrefix, props, query]
     )
     return (
         <Form className="d-flex" onSubmit={onSubmit}>
-            <QueryInput
-                {...props}
-                value={queryState}
-                onChange={setQueryState}
-                prependQueryForSuggestions={implicitQueryPrefix}
-                autoFocus={true}
-                location={props.location}
-                history={props.history}
-                settingsCascade={settingsCascade}
-                placeholder="Search..."
-            />
+            <input type="text" value={query} onChange={onQueryChange} />
             <SearchButton />
         </Form>
     )

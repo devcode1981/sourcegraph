@@ -1,8 +1,11 @@
-import { TelemetryService } from '../../../../shared/src/telemetry/telemetryService'
 import { Observable } from 'rxjs'
-import { gql, dataOrThrowErrors } from '../../../../shared/src/graphql/graphql'
-import { createAggregateError, isErrorLike, ErrorLike } from '../../../../shared/src/util/errors'
-import { map } from 'rxjs/operators'
+import { map, mapTo } from 'rxjs/operators'
+
+import { gql, dataOrThrowErrors } from '@sourcegraph/shared/src/graphql/graphql'
+import { TelemetryService } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { createAggregateError, isErrorLike, ErrorLike } from '@sourcegraph/shared/src/util/errors'
+
+import { requestGraphQL } from '../../backend/graphql'
 import {
     UpdateExternalServiceResult,
     UpdateExternalServiceVariables,
@@ -16,8 +19,11 @@ import {
     DeleteExternalServiceResult,
     ExternalServicesVariables,
     ExternalServicesResult,
+    SetExternalServiceReposVariables,
+    SetExternalServiceReposResult,
+    AffiliatedRepositoriesVariables,
+    AffiliatedRepositoriesResult,
 } from '../../graphql-operations'
-import { requestGraphQL } from '../../backend/graphql'
 
 export const externalServiceFragment = gql`
     fragment ExternalServiceFields on ExternalService {
@@ -26,7 +32,18 @@ export const externalServiceFragment = gql`
         displayName
         config
         warning
+        lastSyncError
+        repoCount
         webhookURL
+        lastSyncAt
+        nextSyncAt
+        updatedAt
+        createdAt
+        namespace {
+            id
+            namespaceName
+            url
+        }
     }
 `
 
@@ -86,6 +103,21 @@ export function updateExternalService(
         .toPromise()
 }
 
+export function setExternalServiceRepos(variables: SetExternalServiceReposVariables): Promise<void> {
+    return requestGraphQL<SetExternalServiceReposResult, SetExternalServiceReposVariables>(
+        gql`
+            mutation SetExternalServiceRepos($id: ID!, $allRepos: Boolean!, $repos: [String!]) {
+                setExternalServiceRepos(id: $id, allRepos: $allRepos, repos: $repos) {
+                    alwaysNil
+                }
+            }
+        `,
+        variables
+    )
+        .pipe(map(dataOrThrowErrors), mapTo(undefined))
+        .toPromise()
+}
+
 export function fetchExternalService(id: Scalars['ID']): Observable<ExternalServiceFields> {
     return requestGraphQL<ExternalServiceResult, ExternalServiceVariables>(
         gql`
@@ -112,6 +144,33 @@ export function fetchExternalService(id: Scalars['ID']): Observable<ExternalServ
     )
 }
 
+export function listAffiliatedRepositories(
+    args: AffiliatedRepositoriesVariables
+): Observable<NonNullable<AffiliatedRepositoriesResult>> {
+    return requestGraphQL<AffiliatedRepositoriesResult, AffiliatedRepositoriesVariables>(
+        gql`
+            query AffiliatedRepositories($user: ID!, $codeHost: ID, $query: String) {
+                affiliatedRepositories(user: $user, codeHost: $codeHost, query: $query) {
+                    nodes {
+                        name
+                        codeHost {
+                            kind
+                            id
+                            displayName
+                        }
+                        private
+                    }
+                }
+            }
+        `,
+        {
+            user: args.user,
+            codeHost: args.codeHost ?? null,
+            query: args.query ?? null,
+        }
+    ).pipe(map(dataOrThrowErrors))
+}
+
 export async function deleteExternalService(externalService: Scalars['ID']): Promise<void> {
     const result = await requestGraphQL<DeleteExternalServiceResult, DeleteExternalServiceVariables>(
         gql`
@@ -132,6 +191,18 @@ export const listExternalServiceFragment = gql`
         kind
         displayName
         config
+        warning
+        lastSyncError
+        repoCount
+        lastSyncAt
+        nextSyncAt
+        updatedAt
+        createdAt
+        namespace {
+            id
+            namespaceName
+            url
+        }
     }
 `
 

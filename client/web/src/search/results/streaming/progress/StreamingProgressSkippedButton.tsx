@@ -3,17 +3,20 @@ import AlertCircleIcon from 'mdi-react/AlertCircleIcon'
 import InformationOutlineIcon from 'mdi-react/InformationOutlineIcon'
 import React, { useCallback, useMemo, useState } from 'react'
 import { ButtonDropdown, DropdownMenu, DropdownToggle } from 'reactstrap'
+
 import { StreamingProgressProps } from './StreamingProgress'
 import { StreamingProgressSkippedPopover } from './StreamingProgressSkippedPopover'
 
-export const StreamingProgressSkippedButton: React.FunctionComponent<Pick<
-    StreamingProgressProps,
-    'progress' | 'onSearchAgain'
->> = ({ progress, onSearchAgain }) => {
+export const StreamingProgressSkippedButton: React.FunctionComponent<
+    Pick<StreamingProgressProps, 'progress' | 'onSearchAgain' | 'history'>
+> = ({ progress, onSearchAgain, history }) => {
     const [isOpen, setIsOpen] = useState(false)
     const toggleOpen = useCallback(() => setIsOpen(previous => !previous), [setIsOpen])
 
-    const skippedWithWarning = useMemo(() => progress.skipped.some(skipped => skipped.severity === 'warn'), [progress])
+    const skippedWithWarningOrError = useMemo(
+        () => progress.skipped.some(skipped => skipped.severity === 'warn' || skipped.severity === 'error'),
+        [progress]
+    )
 
     const onSearchAgainWithPopupClose = useCallback(
         (filters: string[]) => {
@@ -29,15 +32,15 @@ export const StreamingProgressSkippedButton: React.FunctionComponent<Pick<
                 <ButtonDropdown isOpen={isOpen} toggle={toggleOpen}>
                     <DropdownToggle
                         className={classNames(
-                            'streaming-progress__skipped mb-0 ml-2 d-flex align-items-center text-decoration-none',
+                            'streaming-progress__skipped mb-0 ml-2 d-flex align-items-center text-decoration-none btn-sm',
                             {
-                                'streaming-progress__skipped--warning': skippedWithWarning,
+                                'streaming-progress__skipped--warning': skippedWithWarningOrError,
                             }
                         )}
                         caret={true}
                         color="link"
                     >
-                        {skippedWithWarning ? (
+                        {skippedWithWarningOrError ? (
                             <AlertCircleIcon className="mr-2 icon-inline" />
                         ) : (
                             <InformationOutlineIcon className="mr-2 icon-inline" />
@@ -48,6 +51,7 @@ export const StreamingProgressSkippedButton: React.FunctionComponent<Pick<
                         <StreamingProgressSkippedPopover
                             progress={progress}
                             onSearchAgain={onSearchAgainWithPopupClose}
+                            history={history}
                         />
                     </DropdownMenu>
                 </ButtonDropdown>

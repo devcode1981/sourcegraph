@@ -1,7 +1,9 @@
-import { cacheFolder, readLine, getWeekNumber } from './util'
-import * as semver from 'semver'
 import { readFileSync, unlinkSync } from 'fs'
+
 import { parse as parseJSONC } from '@sqs/jsonc-parser'
+import * as semver from 'semver'
+
+import { cacheFolder, readLine, getWeekNumber } from './util'
 
 /**
  * Release configuration file format
@@ -15,10 +17,8 @@ export interface Config {
     previousRelease: string
     upcomingRelease: string
 
-    releaseDateTime: string
-    oneWorkingDayBeforeRelease: string
-    fourWorkingDaysBeforeRelease: string
-    fiveWorkingDaysBeforeRelease: string
+    releaseDate: string
+    oneWorkingDayAfterRelease: string
 
     slackAnnounceChannel: string
 
@@ -26,6 +26,7 @@ export interface Config {
         tags?: boolean
         changesets?: boolean
         trackingIssues?: boolean
+        calendar?: boolean
     }
 }
 

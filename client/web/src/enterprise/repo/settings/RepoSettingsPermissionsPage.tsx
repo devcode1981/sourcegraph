@@ -1,11 +1,12 @@
+import * as H from 'history'
 import React, { useEffect } from 'react'
+
 import { PageTitle } from '../../../components/PageTitle'
 import { Timestamp } from '../../../components/time/Timestamp'
-import { eventLogger } from '../../../tracking/eventLogger'
-import * as H from 'history'
-import { scheduleRepositoryPermissionsSync } from '../../../site-admin/backend'
-import { ActionContainer } from '../../../repo/settings/components/ActionContainer'
 import { SettingsAreaRepositoryFields } from '../../../graphql-operations'
+import { ActionContainer } from '../../../repo/settings/components/ActionContainer'
+import { scheduleRepositoryPermissionsSync } from '../../../site-admin/backend'
+import { eventLogger } from '../../../tracking/eventLogger'
 
 export interface RepoSettingsPermissionsPageProps {
     repo: SettingsAreaRepositoryFields
@@ -73,9 +74,7 @@ interface ScheduleRepositoryPermissionsSyncActionContainerProps {
     history: H.History
 }
 
-class ScheduleRepositoryPermissionsSyncActionContainer extends React.PureComponent<
-    ScheduleRepositoryPermissionsSyncActionContainerProps
-> {
+class ScheduleRepositoryPermissionsSyncActionContainer extends React.PureComponent<ScheduleRepositoryPermissionsSyncActionContainerProps> {
     public render(): JSX.Element | null {
         return (
             <ActionContainer

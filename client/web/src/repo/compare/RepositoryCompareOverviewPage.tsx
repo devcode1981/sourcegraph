@@ -1,27 +1,29 @@
-import { Hoverifier } from '@sourcegraph/codeintellify'
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import * as React from 'react'
 import { RouteComponentProps } from 'react-router'
 import { merge, Observable, of, Subject, Subscription } from 'rxjs'
 import { catchError, distinctUntilChanged, map, switchMap } from 'rxjs/operators'
-import { ActionItemAction } from '../../../../shared/src/actions/ActionItem'
-import { HoverMerged } from '../../../../shared/src/api/client/types/hover'
-import { ExtensionsControllerProps } from '../../../../shared/src/extensions/controller'
-import { gql } from '../../../../shared/src/graphql/graphql'
-import * as GQL from '../../../../shared/src/graphql/schema'
-import { PlatformContextProps } from '../../../../shared/src/platform/context'
-import { asError, createAggregateError, ErrorLike, isErrorLike } from '../../../../shared/src/util/errors'
-import { FileSpec, RepoSpec, ResolvedRevisionSpec, RevisionSpec } from '../../../../shared/src/util/url'
+
+import { Hoverifier } from '@sourcegraph/codeintellify'
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { ActionItemAction } from '@sourcegraph/shared/src/actions/ActionItem'
+import { HoverMerged } from '@sourcegraph/shared/src/api/client/types/hover'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { gql } from '@sourcegraph/shared/src/graphql/graphql'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { asError, createAggregateError, ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { FileSpec, RepoSpec, ResolvedRevisionSpec, RevisionSpec } from '@sourcegraph/shared/src/util/url'
+
 import { queryGraphQL } from '../../backend/graphql'
+import { ErrorAlert } from '../../components/alerts'
 import { PageTitle } from '../../components/PageTitle'
+import { Scalars } from '../../graphql-operations'
 import { eventLogger } from '../../tracking/eventLogger'
+
 import { RepositoryCompareAreaPageProps } from './RepositoryCompareArea'
 import { RepositoryCompareCommitsPage } from './RepositoryCompareCommitsPage'
 import { RepositoryCompareDiffPage } from './RepositoryCompareDiffPage'
-import { ThemeProps } from '../../../../shared/src/theme'
-import { ErrorAlert } from '../../components/alerts'
-import * as H from 'history'
-import { Scalars } from '../../graphql-operations'
 
 function queryRepositoryComparison(args: {
     repo: Scalars['ID']
@@ -88,7 +90,6 @@ interface Props
     /** The head of the comparison. */
     head: { repoName: string; repoID: Scalars['ID']; revision?: string | null }
     hoverifier: Hoverifier<RepoSpec & RevisionSpec & FileSpec & ResolvedRevisionSpec, HoverMerged, ActionItemAction>
-    history: H.History
 }
 
 interface State {
@@ -157,7 +158,7 @@ export class RepositoryCompareOverviewPage extends React.PureComponent<Props, St
                 ) : this.state.rangeOrError === undefined ? (
                     <LoadingSpinner className="icon-inline" />
                 ) : isErrorLike(this.state.rangeOrError) ? (
-                    <ErrorAlert className="mt-2" error={this.state.rangeOrError} history={this.props.history} />
+                    <ErrorAlert className="mt-2" error={this.state.rangeOrError} />
                 ) : (
                     <>
                         <RepositoryCompareCommitsPage {...this.props} />

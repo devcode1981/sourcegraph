@@ -1,33 +1,49 @@
-import React, { useCallback } from 'react'
-import * as H from 'history'
-import RegexIcon from 'mdi-react/RegexIcon'
 import classNames from 'classnames'
-import FormatLetterCaseIcon from 'mdi-react/FormatLetterCaseIcon'
-import { PatternTypeProps, CaseSensitivityProps, InteractiveSearchProps, CopyQueryButtonProps } from '../..'
-import { SettingsCascadeProps } from '../../../../../shared/src/settings/settings'
-import { isEmpty } from 'lodash'
-import { submitSearch } from '../../helpers'
-import { QueryInputToggle } from './QueryInputToggle'
-import { isErrorLike } from '../../../../../shared/src/util/errors'
+import * as H from 'history'
 import CodeBracketsIcon from 'mdi-react/CodeBracketsIcon'
-import { generateFiltersQuery } from '../../../../../shared/src/util/url'
-import { CopyQueryButton } from './CopyQueryButton'
-import { VersionContextProps } from '../../../../../shared/src/search/util'
+import FormatLetterCaseIcon from 'mdi-react/FormatLetterCaseIcon'
+import RegexIcon from 'mdi-react/RegexIcon'
+import React, { useCallback } from 'react'
+
+import { appendContextFilter } from '@sourcegraph/shared/src/search/query/transformer'
+import { findFilter, FilterKind } from '@sourcegraph/shared/src/search/query/validate'
+import { VersionContextProps } from '@sourcegraph/shared/src/search/util'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { isErrorLike } from '@sourcegraph/shared/src/util/errors'
+
+import { PatternTypeProps, CaseSensitivityProps, CopyQueryButtonProps, SearchContextProps } from '../..'
 import { SearchPatternType } from '../../../graphql-operations'
-import { findFilter, FilterKind } from '../../../../../shared/src/search/query/validate'
+import { KEYBOARD_SHORTCUT_COPY_FULL_QUERY } from '../../../keyboardShortcuts/keyboardShortcuts'
+import { isMacPlatform } from '../../../util'
+import { submitSearch } from '../../helpers'
+
+import { CopyQueryButton } from './CopyQueryButton'
+import { QueryInputToggle } from './QueryInputToggle'
 
 export interface TogglesProps
     extends PatternTypeProps,
         CaseSensitivityProps,
         SettingsCascadeProps,
         CopyQueryButtonProps,
-        Partial<Pick<InteractiveSearchProps, 'filtersInQuery'>>,
-        VersionContextProps {
+        VersionContextProps,
+        Pick<SearchContextProps, 'showSearchContext' | 'selectedSearchContextSpec'> {
     navbarSearchQuery: string
     history: H.History
     location: H.Location
     hasGlobalQueryBehavior?: boolean
     className?: string
+}
+
+export const getFullQuery = (
+    query: string,
+    searchContextSpec: string,
+    caseSensitive: boolean,
+    patternType: SearchPatternType
+): string => {
+    const finalQuery = [query, `patternType:${patternType}`, caseSensitive ? 'case:yes' : '']
+        .filter(queryPart => !!queryPart)
+        .join(' ')
+    return appendContextFilter(finalQuery, searchContextSpec)
 }
 
 /**
@@ -37,7 +53,6 @@ export const Toggles: React.FunctionComponent<TogglesProps> = (props: TogglesPro
     const {
         history,
         navbarSearchQuery,
-        filtersInQuery,
         versionContext,
         hasGlobalQueryBehavior,
         patternType,
@@ -47,6 +62,7 @@ export const Toggles: React.FunctionComponent<TogglesProps> = (props: TogglesPro
         settingsCascade,
         className,
         copyQueryButton,
+        selectedSearchContextSpec,
     } = props
 
     const structuralSearchDisabled = window.context?.experimentalFeatures?.structuralSearch === 'disabled'
@@ -56,7 +72,7 @@ export const Toggles: React.FunctionComponent<TogglesProps> = (props: TogglesPro
             // Only submit search on toggle when the query input has global behavior (i.e. it's on the main search page
             // or global navbar). Non-global inputs don't have the canonical query and need more context, making
             // submit on-toggle undesirable. Also, only submit on toggle only when the query is non-empty.
-            const searchQueryNotEmpty = navbarSearchQuery !== '' || (filtersInQuery && !isEmpty(filtersInQuery))
+            const searchQueryNotEmpty = navbarSearchQuery !== ''
             const shouldSubmitSearch = hasGlobalQueryBehavior && searchQueryNotEmpty
             if (shouldSubmitSearch) {
                 const activation = undefined
@@ -71,11 +87,19 @@ export const Toggles: React.FunctionComponent<TogglesProps> = (props: TogglesPro
                     caseSensitive: newCaseSensitive,
                     versionContext,
                     activation,
-                    filtersInQuery,
+                    selectedSearchContextSpec,
                 })
             }
         },
-        [caseSensitive, filtersInQuery, hasGlobalQueryBehavior, history, navbarSearchQuery, patternType, versionContext]
+        [
+            caseSensitive,
+            hasGlobalQueryBehavior,
+            history,
+            navbarSearchQuery,
+            patternType,
+            versionContext,
+            selectedSearchContextSpec,
+        ]
     )
 
     const toggleCaseSensitivity = useCallback((): void => {
@@ -107,23 +131,10 @@ export const Toggles: React.FunctionComponent<TogglesProps> = (props: TogglesPro
         submitOnToggle({ newPatternType })
     }, [patternType, setPatternType, settingsCascade.final, submitOnToggle])
 
-    const fullQuery = [
-        navbarSearchQuery,
-        filtersInQuery && generateFiltersQuery(filtersInQuery),
-        `patternType:${patternType}`,
-        caseSensitive ? 'case:yes' : '',
-    ]
-        .filter(queryPart => !!queryPart)
-        .join(' ')
+    const fullQuery = getFullQuery(navbarSearchQuery, selectedSearchContextSpec || '', caseSensitive, patternType)
 
     return (
         <div className={classNames('toggle-container', className)}>
-            {copyQueryButton && (
-                <CopyQueryButton
-                    fullQuery={fullQuery}
-                    className="toggle-container__toggle toggle-container__copy-query-button"
-                />
-            )}
             <QueryInputToggle
                 {...props}
                 title="Case sensitivity"
@@ -154,7 +165,7 @@ export const Toggles: React.FunctionComponent<TogglesProps> = (props: TogglesPro
                 isActive={patternType === SearchPatternType.regexp}
                 onToggle={toggleRegexp}
                 icon={RegexIcon}
-                className="test-regexp-toggle"
+                className="toggle-container__regexp-button test-regexp-toggle"
                 activeClassName="test-regexp-toggle--active"
                 disableOn={[
                     {
@@ -180,6 +191,17 @@ export const Toggles: React.FunctionComponent<TogglesProps> = (props: TogglesPro
                         },
                     ]}
                 />
+            )}
+            {copyQueryButton && (
+                <>
+                    <div className="toggle-container__separator" />
+                    <CopyQueryButton
+                        fullQuery={fullQuery}
+                        keyboardShortcutForFullCopy={KEYBOARD_SHORTCUT_COPY_FULL_QUERY}
+                        isMacPlatform={isMacPlatform}
+                        className="toggle-container__toggle toggle-container__copy-query-button"
+                    />
+                </>
             )}
         </div>
     )

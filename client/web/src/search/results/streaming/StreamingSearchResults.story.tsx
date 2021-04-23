@@ -3,18 +3,22 @@ import { createBrowserHistory } from 'history'
 import React from 'react'
 import { NEVER, of } from 'rxjs'
 import sinon from 'sinon'
-import { SearchPatternType } from '../../../../../shared/src/graphql-operations'
-import * as GQL from '../../../../../shared/src/graphql/schema'
-import { NOOP_TELEMETRY_SERVICE } from '../../../../../shared/src/telemetry/telemetryService'
-import { WebStory } from '../../../components/WebStory'
-import { AggregateStreamingSearchResults } from '../../stream'
-import { StreamingSearchResults, StreamingSearchResultsProps } from './StreamingSearchResults'
+
+import { SearchPatternType } from '@sourcegraph/shared/src/graphql-operations'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { NOOP_TELEMETRY_SERVICE } from '@sourcegraph/shared/src/telemetry/telemetryService'
 import {
     extensionsController,
     HIGHLIGHTED_FILE_LINES_LONG,
     MULTIPLE_SEARCH_RESULT,
     REPO_MATCH_RESULT,
-} from '../../../../../shared/src/util/searchTestHelpers'
+} from '@sourcegraph/shared/src/util/searchTestHelpers'
+
+import { AuthenticatedUser } from '../../../auth'
+import { WebStory } from '../../../components/WebStory'
+import { AggregateStreamingSearchResults } from '../../stream'
+
+import { StreamingSearchResults, StreamingSearchResultsProps } from './StreamingSearchResults'
 
 const history = createBrowserHistory()
 history.replace({ search: 'q=r:golang/oauth2+test+f:travis' })
@@ -31,12 +35,10 @@ const streamingSearchResult: AggregateStreamingSearchResults = {
 }
 
 const defaultProps: StreamingSearchResultsProps = {
+    parsedSearchQuery: 'r:golang/oauth2 test f:travis',
     caseSensitive: false,
-    setCaseSensitivity: sinon.spy(),
     patternType: SearchPatternType.literal,
-    setPatternType: sinon.spy(),
     versionContext: undefined,
-    setVersionContext: sinon.spy(),
     availableVersionContexts: [],
     previousVersionContext: null,
 
@@ -48,7 +50,7 @@ const defaultProps: StreamingSearchResultsProps = {
     authenticatedUser: null,
     isLightTheme: true,
 
-    navbarSearchQueryState: { query: '', cursorPosition: 0 },
+    navbarSearchQueryState: { query: '' },
 
     settingsCascade: {
         subjects: null,
@@ -59,6 +61,7 @@ const defaultProps: StreamingSearchResultsProps = {
     streamSearch: () => of(streamingSearchResult),
 
     fetchHighlightedFileLineRanges: () => of(HIGHLIGHTED_FILE_LINES_LONG),
+    enableCodeMonitoring: false,
 }
 
 const { add } = storiesOf('web/search/results/streaming/StreamingSearchResults', module).addParameters({
@@ -82,27 +85,51 @@ add('no results', () => {
     return <WebStory>{() => <StreamingSearchResults {...defaultProps} streamSearch={() => of(result)} />}</WebStory>
 })
 
-add('diffs tab selected', () => {
-    const history = createBrowserHistory()
-    history.replace({ search: 'q=r:golang/oauth2+test+f:travis+type:diff' })
+add('diffs tab selected, code monitoring enabled, user logged in', () => (
+    <WebStory>
+        {() => (
+            <StreamingSearchResults
+                {...defaultProps}
+                parsedSearchQuery="r:golang/oauth2 test f:travis type:diff"
+                enableCodeMonitoring={true}
+                authenticatedUser={
+                    {
+                        url: '/users/alice',
+                        displayName: 'Alice',
+                        username: 'alice',
+                        email: 'alice@email.test',
+                    } as AuthenticatedUser
+                }
+            />
+        )}
+    </WebStory>
+))
 
-    return (
-        <WebStory>
-            {() => <StreamingSearchResults {...defaultProps} history={history} location={history.location} />}
-        </WebStory>
-    )
-})
+add('code tab selected, code monitoring enabled, user logged in', () => (
+    <WebStory>
+        {() => (
+            <StreamingSearchResults
+                {...defaultProps}
+                parsedSearchQuery="r:golang/oauth2 test f:travis"
+                enableCodeMonitoring={true}
+                authenticatedUser={
+                    {
+                        url: '/users/alice',
+                        displayName: 'Alice',
+                        username: 'alice',
+                        email: 'alice@email.test',
+                    } as AuthenticatedUser
+                }
+            />
+        )}
+    </WebStory>
+))
 
-add('search with quotes', () => {
-    const history = createBrowserHistory()
-    history.replace({ search: 'q=r:golang/oauth2+test+f:travis+"test"' })
-
-    return (
-        <WebStory>
-            {() => <StreamingSearchResults {...defaultProps} history={history} location={history.location} />}
-        </WebStory>
-    )
-})
+add('search with quotes', () => (
+    <WebStory>
+        {() => <StreamingSearchResults {...defaultProps} parsedSearchQuery='r:golang/oauth2 test f:travis "test"' />}
+    </WebStory>
+))
 
 add('progress with warnings', () => {
     const result: AggregateStreamingSearchResults = {
@@ -258,6 +285,28 @@ add('error with some results', () => {
             skipped: [],
         },
         error: new Error('test error'),
+    }
+
+    return <WebStory>{() => <StreamingSearchResults {...defaultProps} streamSearch={() => of(result)} />}</WebStory>
+})
+
+add('limit hit with some results', () => {
+    const result: AggregateStreamingSearchResults = {
+        state: 'complete',
+        results: MULTIPLE_SEARCH_RESULT.results,
+        filters: MULTIPLE_SEARCH_RESULT.dynamicFilters,
+        progress: {
+            durationMs: 500,
+            matchCount: MULTIPLE_SEARCH_RESULT.matchCount,
+            skipped: [
+                {
+                    reason: 'document-match-limit',
+                    message: 'result limit hit',
+                    severity: 'info',
+                    title: 'result limit hit',
+                },
+            ],
+        },
     }
 
     return <WebStory>{() => <StreamingSearchResults {...defaultProps} streamSearch={() => of(result)} />}</WebStory>

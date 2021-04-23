@@ -1,27 +1,33 @@
 import * as H from 'history'
 import React, { useCallback, useMemo } from 'react'
-import { CaseSensitivityProps, PatternTypeProps } from '../..'
-import { ExtensionsControllerProps } from '../../../../../shared/src/extensions/controller'
-import { VersionContextProps } from '../../../../../shared/src/search/util'
-import { TelemetryProps } from '../../../../../shared/src/telemetry/telemetryService'
-import { useObservable } from '../../../../../shared/src/util/useObservable'
-import { Settings } from '../../../schema/settings.schema'
-import { QueryState, submitSearch, toggleSearchFilter } from '../../helpers'
-import { AggregateStreamingSearchResults, Filter } from '../../stream'
-import { DynamicSearchFilter, SearchResultsFilterBars } from '../SearchResultsFilterBars'
+import { from } from 'rxjs'
+import { switchMap } from 'rxjs/operators'
+
+import { wrapRemoteObservable } from '@sourcegraph/shared/src/api/client/api/common'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { VersionContextProps } from '@sourcegraph/shared/src/search/util'
 import {
     isSettingsValid,
     SettingsCascadeOrError,
     SettingsCascadeProps,
-} from '../../../../../shared/src/settings/settings'
+} from '@sourcegraph/shared/src/settings/settings'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
+
+import { CaseSensitivityProps, PatternTypeProps, SearchContextProps } from '../..'
+import { Settings } from '../../../schema/settings.schema'
+import { QueryState, submitSearch, toggleSearchFilter } from '../../helpers'
+import { AggregateStreamingSearchResults, Filter } from '../../stream'
+import { DynamicSearchFilter, SearchResultsFilterBars } from '../SearchResultsFilterBars'
 
 interface Props
     extends SettingsCascadeProps,
-        ExtensionsControllerProps<'executeCommand' | 'extHostAPI' | 'services'>,
+        ExtensionsControllerProps<'executeCommand' | 'extHostAPI'>,
         TelemetryProps,
-        PatternTypeProps,
-        VersionContextProps,
-        CaseSensitivityProps {
+        Pick<PatternTypeProps, 'patternType'>,
+        Pick<VersionContextProps, 'versionContext'>,
+        Pick<CaseSensitivityProps, 'caseSensitive'>,
+        Pick<SearchContextProps, 'selectedSearchContextSpec'> {
     location: H.Location
     history: H.History
 
@@ -34,10 +40,20 @@ export const StreamingSearchResultsFilterBars: React.FunctionComponent<Props> = 
     const { extensionsController, results, settingsCascade } = props
 
     const contributions = useObservable(
-        useMemo(() => extensionsController.services.contribution.getContributions(), [extensionsController])
+        useMemo(
+            () =>
+                from(extensionsController.extHostAPI).pipe(
+                    switchMap(extensionHostAPI => wrapRemoteObservable(extensionHostAPI.getContributions()))
+                ),
+            [extensionsController]
+        )
     )
+
     const filters = props.results?.filters
     const quickLinks = (isSettingsValid<Settings>(settingsCascade) && settingsCascade.final.quicklinks) || []
+
+    const genericFilters = useMemo(() => getFilters(filters, settingsCascade), [filters, settingsCascade])
+    const repoFilters = useMemo(() => getRepoFilters(filters), [filters])
 
     const onDynamicFilterClicked = useCallback(
         (value: string) => {
@@ -59,9 +75,9 @@ export const StreamingSearchResultsFilterBars: React.FunctionComponent<Props> = 
             navbarSearchQuery={props.navbarSearchQueryState.query}
             searchSucceeded={!!results}
             resultsLimitHit={!!results && results.progress.skipped.some(skipped => skipped.reason.includes('-limit'))}
-            genericFilters={getFilters(filters, settingsCascade)}
+            genericFilters={genericFilters}
             extensionFilters={contributions?.searchFilters}
-            repoFilters={getRepoFilters(filters)}
+            repoFilters={repoFilters}
             quickLinks={quickLinks}
             onFilterClick={onDynamicFilterClicked}
             onShowMoreResultsClick={showMoreResults}

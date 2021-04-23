@@ -1,4 +1,5 @@
 import { ActionItemAction } from '../actions/ActionItem'
+
 import { filterAndRankItems } from './CommandList'
 
 describe('filterAndRankItems', () => {
@@ -10,7 +11,10 @@ describe('filterAndRankItems', () => {
         expect(
             actionIDs(
                 filterAndRankItems(
-                    [{ action: { id: 'a', command: 'a' } }, { action: { id: 'b', command: 'b' } }],
+                    [
+                        { action: { id: 'a', command: 'a' }, active: true },
+                        { action: { id: 'b', command: 'b' }, active: true },
+                    ],
                     '',
                     null
                 )
@@ -22,9 +26,9 @@ describe('filterAndRankItems', () => {
             actionIDs(
                 filterAndRankItems(
                     [
-                        { action: { id: 'a', command: 'a', title: 'a' } },
-                        { action: { id: 'b1', command: 'b1', title: 'b' } },
-                        { action: { id: 'b2', command: 'b2', title: '22b' } },
+                        { action: { id: 'a', command: 'a', title: 'a' }, active: true },
+                        { action: { id: 'b1', command: 'b1', title: 'b' }, active: true },
+                        { action: { id: 'b2', command: 'b2', title: '22b' }, active: true },
                     ],
                     'b',
                     null
@@ -35,9 +39,14 @@ describe('filterAndRankItems', () => {
     test('no query, recentActions', () =>
         expect(
             actionIDs(
-                filterAndRankItems([{ action: { id: 'a', command: 'a' } }, { action: { id: 'b', command: 'b' } }], '', [
-                    'b',
-                ])
+                filterAndRankItems(
+                    [
+                        { action: { id: 'a', command: 'a' }, active: true },
+                        { action: { id: 'b', command: 'b' }, active: true },
+                    ],
+                    '',
+                    ['b']
+                )
             )
         ).toEqual(['b', 'a']))
 
@@ -46,9 +55,9 @@ describe('filterAndRankItems', () => {
             actionIDs(
                 filterAndRankItems(
                     [
-                        { action: { id: 'a', command: 'a', title: 'a' } },
-                        { action: { id: 'b1', command: 'b1', title: 'b' } },
-                        { action: { id: 'b2', command: 'b2', title: '2b' } },
+                        { action: { id: 'a', command: 'a', title: 'a' }, active: true },
+                        { action: { id: 'b1', command: 'b1', title: 'b' }, active: true },
+                        { action: { id: 'b2', command: 'b2', title: '2b' }, active: true },
                     ],
                     'b',
                     ['b2']

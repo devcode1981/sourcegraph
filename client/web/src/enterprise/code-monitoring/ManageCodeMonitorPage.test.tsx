@@ -1,18 +1,25 @@
-import * as React from 'react'
-import * as H from 'history'
-import { AuthenticatedUser } from '../../auth'
-import sinon from 'sinon'
 import { mount } from 'enzyme'
-import { ManageCodeMonitorPage } from './ManageCodeMonitorPage'
-import { mockCodeMonitor } from './testing/util'
-import { NEVER, of } from 'rxjs'
+import * as H from 'history'
+import * as React from 'react'
 import { act } from 'react-dom/test-utils'
+import { NEVER, of } from 'rxjs'
+import sinon from 'sinon'
+
 import {
     MonitorEditInput,
     MonitorEditTriggerInput,
     MonitorEditActionInput,
     MonitorEmailPriority,
-} from '../../../../shared/src/graphql-operations'
+} from '@sourcegraph/shared/src/graphql-operations'
+
+import { AuthenticatedUser } from '../../auth'
+
+import { ManageCodeMonitorPage } from './ManageCodeMonitorPage'
+import { mockCodeMonitor } from './testing/util'
+
+jest.mock('../../tracking/eventLogger', () => ({
+    eventLogger: { logViewEvent: () => undefined },
+}))
 
 describe('ManageCodeMonitorPage', () => {
     const mockUser = {
@@ -107,7 +114,7 @@ describe('ManageCodeMonitorPage', () => {
         const component = mount(<ManageCodeMonitorPage {...props} />)
         let triggerInput = component.find('.test-trigger-input')
         expect(triggerInput.length).toBe(0)
-        const editTrigger = component.find('.test-edit-trigger')
+        const editTrigger = component.find('.test-trigger-button')
         editTrigger.simulate('click')
         triggerInput = component.find('.test-trigger-input')
         expect(triggerInput.length).toBe(1)
@@ -117,7 +124,7 @@ describe('ManageCodeMonitorPage', () => {
         const component = mount(<ManageCodeMonitorPage {...props} />)
         let triggerInput = component.find('.test-action-form')
         expect(triggerInput.length).toBe(0)
-        const editTrigger = component.find('.test-edit-action')
+        const editTrigger = component.find('.test-action-button')
         editTrigger.simulate('click')
         triggerInput = component.find('.test-action-form')
         expect(triggerInput.length).toBe(1)

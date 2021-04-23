@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+
 	"github.com/sourcegraph/sourcegraph/internal/observation"
 )
 
@@ -152,10 +153,8 @@ func TestGCSUpload(t *testing.T) {
 
 	if calls := objectHandle.NewWriterFunc.History(); len(calls) != 1 {
 		t.Fatalf("unexpected number of NewWriter calls. want=%d have=%d", 1, len(calls))
-	} else {
-		if value := buf.String(); value != "TEST PAYLOAD" {
-			t.Errorf("unexpected payload. want=%s have=%s", "TEST PAYLOAD", value)
-		}
+	} else if value := buf.String(); value != "TEST PAYLOAD" {
+		t.Errorf("unexpected payload. want=%s have=%s", "TEST PAYLOAD", value)
 	}
 }
 
@@ -266,7 +265,7 @@ func testGCSClient(client gcsAPI, manageBucket bool) Store {
 }
 
 func rawGCSClient(client gcsAPI, manageBucket bool) *gcsStore {
-	return newGCSWithClient(client, "test-bucket", time.Hour*24*3, manageBucket, GCSConfig{ProjectID: "pid"}, makeOperations(&observation.TestContext))
+	return newGCSWithClient(client, "test-bucket", time.Hour*24*3, manageBucket, GCSConfig{ProjectID: "pid"}, newOperations(&observation.TestContext))
 }
 
 type nopCloser struct {

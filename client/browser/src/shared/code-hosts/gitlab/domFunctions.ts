@@ -1,4 +1,5 @@
 import { DiffPart } from '@sourcegraph/codeintellify'
+
 import { DOMFunctions } from '../shared/codeViews'
 
 const getSingleFileCodeElementFromLineNumber = (
@@ -7,7 +8,7 @@ const getSingleFileCodeElementFromLineNumber = (
     part?: DiffPart
 ): HTMLElement | null => codeView.querySelector<HTMLElement>(`#LC${line}`)
 export const singleFileDOMFunctions: DOMFunctions = {
-    getCodeElementFromTarget: target => target.closest('span.line') as HTMLElement | null,
+    getCodeElementFromTarget: target => target.closest('span.line'),
     getLineNumberFromCodeElement: codeElement => {
         const line = codeElement.id.replace(/^LC/, '')
         return parseInt(line, 10)
@@ -19,7 +20,7 @@ export const singleFileDOMFunctions: DOMFunctions = {
 const getDiffCodePart: DOMFunctions['getDiffCodePart'] = codeElement => {
     let selector = 'old'
 
-    const row = codeElement.closest('td')!
+    const row = codeElement.closest('.diff-td,td')!
 
     // Split diff
     if (row.classList.contains('parallel')) {
@@ -37,7 +38,7 @@ const getDiffCodeElementFromLineNumber = (codeView: HTMLElement, line: number, p
         return null
     }
 
-    const row = lineNumberElement.closest('tr')
+    const row = lineNumberElement.closest('.diff-tr,tr')
     if (!row) {
         return null
     }
@@ -57,10 +58,12 @@ export const diffDOMFunctions: DOMFunctions = {
     getLineNumberFromCodeElement: codeElement => {
         const part = getDiffCodePart(codeElement)
 
-        let cell: HTMLElement | null = codeElement.closest('td')
+        let cell: HTMLElement | null = codeElement.closest('.diff-td,td')
         while (
             cell &&
-            !cell.matches(`.diff-line-num.${part === 'base' ? 'old_line' : 'new_line'}`) &&
+            // It's possible for a line number container to not contain an <a> tag with the line
+            // number, e.g. right side 'old_line' for a deleted file
+            !(cell.matches(`.diff-line-num.${part === 'base' ? 'old_line' : 'new_line'}`) && cell.querySelector('a')) &&
             cell.previousElementSibling
         ) {
             cell = cell.previousElementSibling as HTMLElement | null

@@ -3,21 +3,21 @@ import endOfDay from 'date-fns/endOfDay'
 import React, { useState, useCallback } from 'react'
 import { Observable } from 'rxjs'
 import { catchError, map, startWith, switchMap, tap } from 'rxjs/operators'
-import { gql } from '../../../../../../shared/src/graphql/graphql'
-import * as GQL from '../../../../../../shared/src/graphql/schema'
-import { asError, createAggregateError, isErrorLike } from '../../../../../../shared/src/util/errors'
+
+import { Form } from '@sourcegraph/branded/src/components/Form'
+import { Scalars } from '@sourcegraph/shared/src/graphql-operations'
+import { gql } from '@sourcegraph/shared/src/graphql/graphql'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { asError, createAggregateError, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { useEventObservable } from '@sourcegraph/shared/src/util/useObservable'
+
 import { mutateGraphQL } from '../../../../backend/graphql'
-import { Form } from '../../../../../../branded/src/components/Form'
-import { ExpirationDate } from '../../../productSubscription/ExpirationDate'
 import { ErrorAlert } from '../../../../components/alerts'
-import { useEventObservable } from '../../../../../../shared/src/util/useObservable'
-import * as H from 'history'
-import { Scalars } from '../../../../../../shared/src/graphql-operations'
+import { ExpirationDate } from '../../../productSubscription/ExpirationDate'
 
 interface Props {
     subscriptionID: Scalars['ID']
     onGenerate: () => void
-    history: H.History
 }
 
 const LOADING = 'loading' as const
@@ -54,7 +54,6 @@ const DURATION_LINKS = [
 export const SiteAdminGenerateProductLicenseForSubscriptionForm: React.FunctionComponent<Props> = ({
     subscriptionID,
     onGenerate,
-    history,
 }) => {
     const [formData, setFormData] = useState<FormData>(EMPTY_FORM_DATA)
 
@@ -204,17 +203,14 @@ export const SiteAdminGenerateProductLicenseForSubscriptionForm: React.FunctionC
                         <small className="form-text text-muted d-block mt-1">
                             Set to{' '}
                             {DURATION_LINKS.map(({ label, days }) => (
-                                <a
-                                    href="#"
+                                <button
+                                    type="button"
                                     key={days}
-                                    className="mr-2"
-                                    onClick={event => {
-                                        event.preventDefault()
-                                        setValidDays(days)
-                                    }}
+                                    className="btn btn-link btn-sm p-0 mr-2"
+                                    onClick={() => setValidDays(days)}
                                 >
                                     {label}
-                                </a>
+                                </button>
                             ))}
                         </small>
                     </div>
@@ -227,7 +223,7 @@ export const SiteAdminGenerateProductLicenseForSubscriptionForm: React.FunctionC
                     </button>
                 </Form>
             )}
-            {isErrorLike(creation) && <ErrorAlert className="mt-3" error={creation} history={history} />}
+            {isErrorLike(creation) && <ErrorAlert className="mt-3" error={creation} />}
         </div>
     )
 }

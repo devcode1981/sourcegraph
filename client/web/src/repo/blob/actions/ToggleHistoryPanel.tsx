@@ -3,24 +3,29 @@ import HistoryIcon from 'mdi-react/HistoryIcon'
 import * as React from 'react'
 import { fromEvent, Subject, Subscription } from 'rxjs'
 import { filter } from 'rxjs/operators'
-import { ButtonLink } from '../../../../../shared/src/components/LinkOrButton'
+
+import { Tooltip } from '@sourcegraph/branded/src/components/tooltip/Tooltip'
+import { ButtonLink } from '@sourcegraph/shared/src/components/LinkOrButton'
 import {
     lprToRange,
     parseHash,
     toPositionOrRangeHash,
     toViewStateHashComponent,
-} from '../../../../../shared/src/util/url'
-import { Tooltip } from '../../../../../branded/src/components/tooltip/Tooltip'
+} from '@sourcegraph/shared/src/util/url'
+
 import { eventLogger } from '../../../tracking/eventLogger'
+import { RepoHeaderContext } from '../../RepoHeader'
 import { BlobPanelTabID } from '../panel/BlobPanel'
 
 /**
  * A repository header action that toggles the visibility of the history panel.
  */
-export class ToggleHistoryPanel extends React.PureComponent<{
-    location: H.Location
-    history: H.History
-}> {
+export class ToggleHistoryPanel extends React.PureComponent<
+    {
+        location: H.Location
+        history: H.History
+    } & RepoHeaderContext
+> {
     private toggles = new Subject<boolean>()
     private subscriptions = new Subscription()
 
@@ -72,6 +77,15 @@ export class ToggleHistoryPanel extends React.PureComponent<{
 
     public render(): JSX.Element | null {
         const visible = ToggleHistoryPanel.isVisible(this.props.location)
+
+        if (this.props.actionType === 'dropdown') {
+            return (
+                <ButtonLink className="nav-link repo-header__file-action" onSelect={this.onClick}>
+                    <HistoryIcon className="icon-inline" />
+                    <span>{visible ? 'Hide' : 'Show'} history (Alt+H/Opt+H)</span>
+                </ButtonLink>
+            )
+        }
         return (
             <ButtonLink onSelect={this.onClick} data-tooltip={`${visible ? 'Hide' : 'Show'} history (Alt+H/Opt+H)`}>
                 <HistoryIcon className="icon-inline" />

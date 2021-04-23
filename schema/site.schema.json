@@ -49,6 +49,11 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "rateLimitAnonymous": {
+          "description": "Configures the hourly rate limits for anonymous calls to the GraphQL API. Setting limit to 0 disables the limiter. This is only relevant if unauthenticated calls to the API are permitted.",
+          "type": "integer",
+          "default": 500
+        },
         "eventLogging": {
           "description": "Enables user event logging inside of the Sourcegraph instance. This will allow admins to have greater visibility of user activity, such as frequently viewed pages, frequent searches, and more. These event logs (and any specific user actions) are only stored locally, and never leave this Sourcegraph instance.",
           "type": "string",
@@ -66,12 +71,6 @@
               "default": false
             }
           }
-        },
-        "automation": {
-          "description": "DEPRECATED: Enables the experimental code change management campaigns feature. This field has been deprecated in favour of campaigns.enabled",
-          "type": "string",
-          "enum": ["enabled", "disabled"],
-          "default": "enabled"
         },
         "structuralSearch": {
           "description": "Enables structural search.",
@@ -96,6 +95,12 @@
           "type": "boolean",
           "default": false,
           "!go": { "pointer": true }
+        },
+        "perforce": {
+          "description": "Allow adding Perforce code host connections",
+          "type": "string",
+          "enum": ["enabled", "disabled"],
+          "default": "enabled"
         },
         "tls.external": {
           "description": "Global TLS/SSL settings for Sourcegraph to use when communicating with code hosts.",
@@ -253,29 +258,84 @@
       ],
       "group": "Experimental"
     },
-    "automation.readAccess.enabled": {
-      "description": "DEPRECATED: The automation feature was renamed to campaigns. Use `campaigns.readAccess.enabled` instead.",
-      "type": "boolean",
-      "!go": { "pointer": true },
-      "group": "Campaigns"
-    },
     "campaigns.enabled": {
-      "description": "Enables/disables the campaigns feature.",
+      "description": "DEPRECATED: Use batchChanges.enabled instead. Enables/disables the campaigns feature.",
       "type": "boolean",
       "!go": { "pointer": true },
       "group": "Campaigns",
       "default": true
     },
-    "campaigns.readAccess.enabled": {
-      "description": "DEPRECATED: Enables read-only access to campaigns for non-site-admin users. This doesn't have an effect anymore.",
+    "campaigns.restrictToAdmins": {
+      "description": "DEPRECATED: Use batchChanges.restrictToAdmins instead. When enabled, only site admins can create and apply campaigns.",
       "type": "boolean",
       "!go": { "pointer": true },
-      "group": "Campaigns"
-    },
-    "campaigns.restrictToAdmins": {
-      "description": "When enabled, only site admins can create and apply campaigns.",
-      "type": "boolean",
       "group": "Campaigns",
+      "default": false
+    },
+    "batchChanges.enabled": {
+      "description": "Enables/disables the Batch Changes feature.",
+      "type": "boolean",
+      "!go": { "pointer": true },
+      "group": "BatchChanges",
+      "default": true
+    },
+    "batchChanges.restrictToAdmins": {
+      "description": "When enabled, only site admins can create and apply batch changes.",
+      "type": "boolean",
+      "!go": { "pointer": true },
+      "group": "BatchChanges",
+      "default": false
+    },
+    "batchChanges.rolloutWindows": {
+      "description": "Specifies specific windows, which can have associated rate limits, to be used when publishing changesets. All days and times are handled in UTC.",
+      "type": "array",
+      "!go": { "pointer": true },
+      "group": "BatchChanges",
+      "items": {
+        "title": "BatchChangeRolloutWindow",
+        "type": "object",
+        "required": ["rate"],
+        "additionalProperties": false,
+        "properties": {
+          "rate": {
+            "description": "The rate changesets will be published at.",
+            "oneOf": [
+              { "type": "number", "minimum": 0, "maximum": 0 },
+              {
+                "type": "string",
+                "pattern": "^(unlimited|[0-9]+\\/(sec|secs|second|seconds|min|mins|minute|minutes|hr|hrs|hour|hours))$"
+              }
+            ]
+          },
+          "start": {
+            "description": "Window start time. If omitted, no time window is applied to the day(s) that match this rule.",
+            "type": "string",
+            "pattern": "^[0-9]?[0-9]:[0-9]{2}$"
+          },
+          "end": {
+            "description": "Window end time. If omitted, no time window is applied to the day(s) that match this rule.",
+            "type": "string",
+            "pattern": "^[0-9]?[0-9]:[0-9]{2}$"
+          },
+          "days": {
+            "description": "Day(s) the window applies to. If omitted, this rule applies to all days of the week.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^([mM]on(day)?|[tT]ue(s|sday)?|[wW]ed(nesday)?|[tT]hu(r|rs|rsday)?|[fF]ri(day)?|[sS]at(urday)?|[sS]un(day)?)$"
+            }
+          }
+        },
+        "dependencies": {
+          "start": ["end"]
+        }
+      }
+    },
+    "codeIntelAutoIndexing.enabled": {
+      "description": "Enables/disables the code intel auto indexing feature.",
+      "type": "boolean",
+      "!go": { "pointer": true },
+      "group": "Code intelligence",
       "default": false
     },
     "corsOrigin": {
@@ -299,6 +359,12 @@
     },
     "disableAutoGitUpdates": {
       "description": "Disable periodically fetching git contents for existing repositories.",
+      "type": "boolean",
+      "default": false,
+      "group": "External services"
+    },
+    "disableAutoCodeHostSyncs": {
+      "description": "Disable periodic syncs of configured code host connections (repository metadata, permissions, batch changes changesets, etc)",
       "type": "boolean",
       "default": false,
       "group": "External services"
@@ -369,6 +435,13 @@
       "description": "Maximum number of git clone processes that will be run concurrently per gitserver to update repositories. Note: the global git update scheduler respects gitMaxConcurrentClones. However, we allow each gitserver to run upto gitMaxConcurrentClones to allow for urgent fetches. Urgent fetches are used when a user is browsing a PR and we do not have the commit yet.",
       "type": "integer",
       "default": 5,
+      "group": "External services"
+    },
+    "gitMaxCodehostRequestsPerSecond": {
+      "description": "Maximum number of remote code host git operations (e.g. clone or ls-remote) to be run per second per gitserver. Default is -1, which is unlimited.",
+      "type": "integer",
+      "!go": { "pointer": true },
+      "default": -1,
       "group": "External services"
     },
     "repoListUpdateInterval": {
@@ -649,6 +722,11 @@
               "description": "Sentry Data Source Name (DSN). Per the Sentry docs (https://docs.sentry.io/quickstart/#about-the-dsn), it should match the following pattern: '{PROTOCOL}://{PUBLIC_KEY}@{HOST}/{PATH}{PROJECT_ID}'.",
               "type": "string",
               "pattern": "^https?://"
+            },
+            "backendDSN": {
+              "description": "Sentry Data Source Name (DSN) for backend errors. Per the Sentry docs (https://docs.sentry.io/quickstart/#about-the-dsn), it should match the following pattern: '{PROTOCOL}://{PUBLIC_KEY}@{HOST}/{PATH}{PROJECT_ID}'.",
+              "type": "string",
+              "pattern": "^https?://"
             }
           }
         }
@@ -753,6 +831,25 @@
       "type": "integer",
       "group": "Debug",
       "examples": [["10000"]]
+    },
+    "insights.historical.frames": {
+      "description": "(debug) number of historical insights timeframes to populate",
+      "type": "integer",
+      "group": "Debug",
+      "examples": [["6"]]
+    },
+    "insights.historical.frameLength": {
+      "description": "(debug) duration of historical insights timeframes, one point per repository will be recorded in each timeframe.",
+      "type": "string",
+      "group": "Debug",
+      "examples": ["30d"]
+    },
+    "insights.historical.speedFactor": {
+      "description": "(debug) Speed factor for building historical insights data. A value like 1.5 indicates approximately to use 1.5x as much repo-updater and gitserver resources.",
+      "!go": { "pointer": true },
+      "type": "number",
+      "group": "Debug",
+      "examples": ["1.0"]
     },
     "htmlHeadTop": {
       "description": "HTML to inject at the top of the `<head>` element on each page, for analytics scripts",
@@ -867,6 +964,71 @@
       "type": "integer",
       "default": 2000,
       "group": "Misc."
+    },
+    "productResearchPage.enabled": {
+      "description": "Enables users access to the product research page in their settings.",
+      "type": "boolean",
+      "!go": { "pointer": true },
+      "group": "Misc.",
+      "default": true
+    },
+    "encryption.keys": {
+      "description": "Configuration for encryption keys used to encrypt data at rest in the database.",
+      "type": "object",
+      "properties": {
+        "externalServiceKey": {
+          "$ref": "#/definitions/EncryptionKey"
+        },
+        "userExternalAccountKey": {
+          "$ref": "#/definitions/EncryptionKey"
+        }
+      }
+    },
+    "api.ratelimit": {
+      "description": "Configuration for API rate limiting",
+      "type": "object",
+      "required": ["enabled", "perUser", "perIP"],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether API rate limiting is enabled"
+        },
+        "perUser": {
+          "description": "Limit granted per user per hour",
+          "type": "integer",
+          "minimum": 1,
+          "default": 1000000
+        },
+        "perIP": {
+          "description": "Limit granted per IP per hour, only applied to anonymous users",
+          "type": "integer",
+          "minimum": 1,
+          "default": 1000000
+        },
+        "overrides": {
+          "description": "An array of rate limit overrides",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "description": "The key that we want to override for example a username",
+                "type": "string",
+                "minLength": 1
+              },
+              "limit": {
+                "description": "The limit per hour, 'unlimited' or 'blocked'",
+                "oneOf": [
+                  { "type": "string", "const": "unlimited" },
+                  { "type": "string", "const": "blocked" },
+                  { "type": "integer", "minimum": 1 }
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   },
   "definitions": {
@@ -1012,6 +1174,11 @@
           "description": "Whether the Service Provider should (insecurely) accept assertions from the Identity Provider without a valid signature.",
           "type": "boolean",
           "default": false
+        },
+        "allowSignup": {
+          "description": "Allows new visitors to sign up for accounts via SAML authentication. If false, users signing in via SAML must have an existing Sourcegraph account, which will be linked to their SAML identity after sign-in.",
+          "type": "boolean",
+          "!go": { "pointer": true }
         }
       }
     },
@@ -1034,6 +1201,11 @@
           "description": "The prefix that precedes the username portion of the HTTP header specified in `usernameHeader`. If specified, the prefix will be stripped from the header value and the remainder will be used as the username. For example, if using Google Identity-Aware Proxy (IAP) with Google Sign-In, set this value to `accounts.google.com:`.",
           "type": "string",
           "examples": ["accounts.google.com:"]
+        },
+        "emailHeader": {
+          "description": "The name (case-insensitive) of an HTTP header whose value is taken to be the email of the client requesting the page. Set this value when using an HTTP proxy that authenticates requests, and you don't want the extra configurability of the other authentication methods.",
+          "type": "string",
+          "examples": ["X-App-Email"]
         }
       }
     },
@@ -1148,7 +1320,7 @@
     "NotifierPagerduty": {
       "description": "PagerDuty notifier",
       "type": "object",
-      "required": ["type", "routingKey"],
+      "required": ["type", "integrationKey"],
       "properties": {
         "type": {
           "type": "string",
@@ -1198,7 +1370,7 @@
     "NotifierOpsGenie": {
       "description": "OpsGenie notifier",
       "type": "object",
-      "required": ["type", "apiKey"],
+      "required": ["type"],
       "properties": {
         "type": {
           "type": "string",
@@ -1230,6 +1402,82 @@
               { "required": ["type", "username"] }
             ]
           }
+        }
+      }
+    },
+    "EncryptionKey": {
+      "description": "Config for a key",
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["cloudkms", "mounted", "noop"]
+        }
+      },
+      "oneOf": [
+        {
+          "$ref": "#/definitions/CloudKMSEncryptionKey"
+        },
+        {
+          "$ref": "#/definitions/MountedEncryptionKey"
+        },
+        {
+          "$ref": "#/definitions/NoOpEncryptionKey"
+        }
+      ],
+      "!go": {
+        "taggedUnionType": true
+      }
+    },
+    "CloudKMSEncryptionKey": {
+      "description": "Google Cloud KMS Encryption Key, used to encrypt data in Google Cloud environments",
+      "type": "object",
+      "required": ["type", "keyname"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "cloudkms"
+        },
+        "keyname": {
+          "type": "string"
+        },
+        "credentialsFile": {
+          "type": "string"
+        }
+      }
+    },
+    "MountedEncryptionKey": {
+      "description": "This encryption key is mounted from a given file path or an environment variable.",
+      "type": "object",
+      "required": ["type", "keyname"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "mounted"
+        },
+        "keyname": {
+          "type": "string"
+        },
+        "filepath": {
+          "type": "string"
+        },
+        "envVarName": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "NoOpEncryptionKey": {
+      "description": "This encryption key is a no op, leaving your data in plaintext (not recommended).",
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "noop"
         }
       }
     }

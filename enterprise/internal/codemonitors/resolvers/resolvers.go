@@ -14,10 +14,11 @@ import (
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend/graphqlutil"
 	cm "github.com/sourcegraph/sourcegraph/enterprise/internal/codemonitors"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbutil"
+	"github.com/sourcegraph/sourcegraph/enterprise/internal/codemonitors/email"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 )
 
-// NewResolver returns a new Resolver that uses the given db
+// NewResolver returns a new Resolver that uses the given database
 func NewResolver(db dbutil.DB) graphqlbackend.CodeMonitorsResolver {
 	return &Resolver{store: cm.NewStore(db)}
 }
@@ -35,15 +36,48 @@ func (r *Resolver) Now() time.Time {
 	return r.store.Now()
 }
 
+func (r *Resolver) NodeResolvers() map[string]graphqlbackend.NodeByIDFunc {
+	return map[string]graphqlbackend.NodeByIDFunc{
+		MonitorKind: func(ctx context.Context, id graphql.ID) (graphqlbackend.Node, error) {
+			return r.MonitorByID(ctx, id)
+		},
+		// TODO: These kinds are currently not implemented, but need a node resolver.
+		// monitorTriggerQueryKind: func(ctx context.Context, id graphql.ID) (graphqlbackend.Node, error) {
+		// 	return r.MonitorTriggerQueryByID(ctx, id)
+		// },
+		// monitorTriggerEventKind: func(ctx context.Context, id graphql.ID) (graphqlbackend.Node, error) {
+		// 	return r.MonitorTriggerEventByID(ctx, id)
+		// },
+		// monitorActionEmailKind: func(ctx context.Context, id graphql.ID) (graphqlbackend.Node, error) {
+		// 	return r.MonitorActionEmailByID(ctx, id)
+		// },
+		// monitorActionEventKind: func(ctx context.Context, id graphql.ID) (graphqlbackend.Node, error) {
+		// 	return r.MonitorActionEventByID(ctx, id)
+		// },
+	}
+}
+
 func (r *Resolver) Monitors(ctx context.Context, userID int32, args *graphqlbackend.ListMonitorsArgs) (graphqlbackend.MonitorConnectionResolver, error) {
-	ms, err := r.store.Monitors(ctx, userID, args)
+	// Request one extra to determine if there are more pages
+	newArgs := *args
+	newArgs.First += 1
+
+	ms, err := r.store.Monitors(ctx, userID, &newArgs)
 	if err != nil {
 		return nil, err
 	}
+
 	totalCount, err := r.store.TotalCountMonitors(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
+
+	hasNextPage := false
+	if len(ms) == int(args.First)+1 {
+		hasNextPage = true
+		ms = ms[:len(ms)-1]
+	}
+
 	mrs := make([]graphqlbackend.MonitorResolver, 0, len(ms))
 	for _, m := range ms {
 		mrs = append(mrs, &monitor{
@@ -51,16 +85,17 @@ func (r *Resolver) Monitors(ctx context.Context, userID int32, args *graphqlback
 			Monitor:  m,
 		})
 	}
-	return &monitorConnection{Resolver: r, monitors: mrs, totalCount: totalCount}, nil
+
+	return &monitorConnection{Resolver: r, monitors: mrs, totalCount: totalCount, hasNextPage: hasNextPage}, nil
 }
 
-func (r *Resolver) MonitorByID(ctx context.Context, ID graphql.ID) (m graphqlbackend.MonitorResolver, err error) {
-	err = r.isAllowedToEdit(ctx, ID)
+func (r *Resolver) MonitorByID(ctx context.Context, id graphql.ID) (m graphqlbackend.MonitorResolver, err error) {
+	err = r.isAllowedToEdit(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	var monitorID int64
-	err = relay.UnmarshalSpec(ID, &monitorID)
+	err = relay.UnmarshalSpec(id, &monitorID)
 	if err != nil {
 		return nil, err
 	}
@@ -185,6 +220,38 @@ func (r *Resolver) ResetTriggerQueryTimestamps(ctx context.Context, args *graphq
 	return &graphqlbackend.EmptyResponse{}, nil
 }
 
+func (r *Resolver) TriggerTestEmailAction(ctx context.Context, args *graphqlbackend.TriggerTestEmailActionArgs) (*graphqlbackend.EmptyResponse, error) {
+	err := r.isAllowedToCreate(ctx, args.Namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, recipient := range args.Email.Recipients {
+		if err := sendTestEmail(ctx, recipient, args.Description); err != nil {
+			return nil, err
+		}
+	}
+
+	return &graphqlbackend.EmptyResponse{}, nil
+}
+
+func sendTestEmail(ctx context.Context, recipient graphql.ID, description string) error {
+	var (
+		userID int32
+		orgID  int32
+	)
+	err := graphqlbackend.UnmarshalNamespaceID(recipient, &userID, &orgID)
+	if err != nil {
+		return err
+	}
+	// TODO: Send test email to org members.
+	if orgID != 0 {
+		return nil
+	}
+	data := email.NewTestTemplateDataForNewSearchResults(ctx, description)
+	return email.SendEmailForNewSearchResult(ctx, userID, data)
+}
+
 func (r *Resolver) actionIDsForMonitorIDInt64(ctx context.Context, monitorID int64) (actionIDs []graphql.ID, err error) {
 	limit := 50
 	var (
@@ -214,7 +281,7 @@ func (r *Resolver) actionIDsForMonitorIDInt64(ctx context.Context, monitorID int
 	return ids, nil
 }
 
-func (r *Resolver) actionIDsForMonitorIDINT64SinglePage(ctx context.Context, q *sqlf.Query, limit int) (IDs []graphql.ID, cursor *string, err error) {
+func (r *Resolver) actionIDsForMonitorIDINT64SinglePage(ctx context.Context, q *sqlf.Query, limit int) (ids []graphql.ID, cursor *string, err error) {
 	var rows *sql.Rows
 	rows, err = r.store.Query(ctx, q)
 	if err != nil {
@@ -227,17 +294,17 @@ func (r *Resolver) actionIDsForMonitorIDINT64SinglePage(ctx context.Context, q *
 	if err != nil {
 		return nil, nil, err
 	}
-	IDs = make([]graphql.ID, 0, len(es))
+	ids = make([]graphql.ID, 0, len(es))
 	for _, e := range es {
-		IDs = append(IDs, (&monitorEmail{MonitorEmail: e}).ID())
+		ids = append(ids, (&monitorEmail{MonitorEmail: e}).ID())
 	}
 
 	// Set the cursor if the result size equals limit.
-	if len(IDs) == limit {
-		stringID := string(IDs[len(IDs)-1])
+	if len(ids) == limit {
+		stringID := string(ids[len(ids)-1])
 		cursor = &stringID
 	}
-	return IDs, cursor, nil
+	return ids, cursor, nil
 }
 
 // splitActionIDs splits actions into three buckets: create, delete and update.
@@ -359,7 +426,7 @@ func (r *Resolver) isAllowedToCreate(ctx context.Context, owner graphql.ID) erro
 	case "User":
 		return backend.CheckSiteAdminOrSameUser(ctx, ownerInt32)
 	case "Org":
-		return backend.CheckOrgAccess(ctx, ownerInt32)
+		return backend.CheckOrgAccess(ctx, r.store.Handle().DB(), ownerInt32)
 	default:
 		return fmt.Errorf("provided ID is not a namespace")
 	}
@@ -421,8 +488,9 @@ func ownerForID64Query(ctx context.Context, monitorID int64) (*sqlf.Query, error
 //
 type monitorConnection struct {
 	*Resolver
-	monitors   []graphqlbackend.MonitorResolver
-	totalCount int32
+	monitors    []graphqlbackend.MonitorResolver
+	totalCount  int32
+	hasNextPage bool
 }
 
 func (m *monitorConnection) Nodes(ctx context.Context) ([]graphqlbackend.MonitorResolver, error) {
@@ -434,7 +502,7 @@ func (m *monitorConnection) TotalCount(ctx context.Context) (int32, error) {
 }
 
 func (m *monitorConnection) PageInfo(ctx context.Context) (*graphqlutil.PageInfo, error) {
-	if len(m.monitors) == 0 {
+	if len(m.monitors) == 0 || !m.hasNextPage {
 		return graphqlutil.HasNextPage(false), nil
 	}
 	return graphqlutil.NextPageCursor(string(m.monitors[len(m.monitors)-1].ID())), nil
@@ -462,7 +530,7 @@ func (m *monitor) ID() graphql.ID {
 }
 
 func (m *monitor) CreatedBy(ctx context.Context) (*graphqlbackend.UserResolver, error) {
-	return graphqlbackend.UserByIDInt32(ctx, m.Monitor.CreatedBy)
+	return graphqlbackend.UserByIDInt32(ctx, m.store.Handle().DB(), m.Monitor.CreatedBy)
 }
 
 func (m *monitor) CreatedAt() graphqlbackend.DateTime {
@@ -479,9 +547,9 @@ func (m *monitor) Enabled() bool {
 
 func (m *monitor) Owner(ctx context.Context) (n graphqlbackend.NamespaceResolver, err error) {
 	if m.NamespaceOrgID == nil {
-		n.Namespace, err = graphqlbackend.UserByIDInt32(ctx, *m.NamespaceUserID)
+		n.Namespace, err = graphqlbackend.UserByIDInt32(ctx, m.store.Handle().DB(), *m.NamespaceUserID)
 	} else {
-		n.Namespace, err = graphqlbackend.OrgByIDInt32(ctx, *m.NamespaceOrgID)
+		n.Namespace, err = graphqlbackend.OrgByIDInt32(ctx, m.store.Handle().DB(), *m.NamespaceOrgID)
 	}
 	return n, err
 }
@@ -707,9 +775,9 @@ func (m *monitorEmail) Recipients(ctx context.Context, args *graphqlbackend.List
 	for _, r := range ms {
 		n := graphqlbackend.NamespaceResolver{}
 		if r.NamespaceOrgID == nil {
-			n.Namespace, err = graphqlbackend.UserByIDInt32(ctx, *r.NamespaceUserID)
+			n.Namespace, err = graphqlbackend.UserByIDInt32(ctx, m.store.Handle().DB(), *r.NamespaceUserID)
 		} else {
-			n.Namespace, err = graphqlbackend.OrgByIDInt32(ctx, *r.NamespaceOrgID)
+			n.Namespace, err = graphqlbackend.OrgByIDInt32(ctx, m.store.Handle().DB(), *r.NamespaceOrgID)
 		}
 		if err != nil {
 			return nil, err

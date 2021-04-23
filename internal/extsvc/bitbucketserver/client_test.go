@@ -21,9 +21,10 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/inconshreveable/log15"
 	"github.com/sergi/go-diff/diffmatchpatch"
+	"golang.org/x/time/rate"
+
 	"github.com/sourcegraph/sourcegraph/internal/extsvc/auth"
 	"github.com/sourcegraph/sourcegraph/schema"
-	"golang.org/x/time/rate"
 )
 
 var update = flag.Bool("update", false, "update testdata")
@@ -375,7 +376,7 @@ func TestClient_LoadPullRequest(t *testing.T) {
 				pr.ToRef.Repository.Project.Key = "SOUR"
 				return pr
 			},
-			err: "Bitbucket API HTTP error: code=404 url=\"${INSTANCEURL}/rest/api/1.0/projects/SOUR/repos/vegeta/pull-requests/9999\" body=\"{\\\"errors\\\":[{\\\"context\\\":null,\\\"message\\\":\\\"Pull request 9999 does not exist in SOUR/vegeta.\\\",\\\"exceptionName\\\":\\\"com.atlassian.bitbucket.pull.NoSuchPullRequestException\\\"}]}\"",
+			err: "pull request not found",
 		},
 		{
 			name: "non existing repo",
@@ -394,7 +395,7 @@ func TestClient_LoadPullRequest(t *testing.T) {
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			name := "PullRequests-" + strings.Replace(tc.name, " ", "-", -1)
+			name := "PullRequests-" + strings.ReplaceAll(tc.name, " ", "-")
 			cli, save := NewTestClient(t, name, *update)
 			defer save()
 
@@ -417,7 +418,7 @@ func TestClient_LoadPullRequest(t *testing.T) {
 				return
 			}
 
-			checkGolden(t, "LoadPullRequest-"+strings.Replace(tc.name, " ", "-", -1), pr)
+			checkGolden(t, "LoadPullRequest-"+strings.ReplaceAll(tc.name, " ", "-"), pr)
 		})
 	}
 }
@@ -536,7 +537,7 @@ func TestClient_CreatePullRequest(t *testing.T) {
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			name := "CreatePullRequest-" + strings.Replace(tc.name, " ", "-", -1)
+			name := "CreatePullRequest-" + strings.ReplaceAll(tc.name, " ", "-")
 
 			cli, save := NewTestClient(t, name, *update)
 			defer save()
@@ -620,7 +621,7 @@ func TestClient_DeclinePullRequest(t *testing.T) {
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			name := "DeclinePullRequest-" + strings.Replace(tc.name, " ", "-", -1)
+			name := "DeclinePullRequest-" + strings.ReplaceAll(tc.name, " ", "-")
 
 			cli, save := NewTestClient(t, name, *update)
 			defer save()
@@ -717,7 +718,85 @@ func TestClient_LoadPullRequestActivities(t *testing.T) {
 				return
 			}
 
-			checkGolden(t, "LoadPullRequestActivities-"+strings.Replace(tc.name, " ", "-", -1), pr)
+			checkGolden(t, "LoadPullRequestActivities-"+strings.ReplaceAll(tc.name, " ", "-"), pr)
+		})
+	}
+}
+
+func TestClient_CreatePullRequestComment(t *testing.T) {
+	instanceURL := os.Getenv("BITBUCKET_SERVER_URL")
+	if instanceURL == "" {
+		instanceURL = "https://bitbucket.sgdev.org"
+	}
+
+	timeout, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	pr := &PullRequest{}
+	pr.ToRef.Repository.Slug = "automation-testing"
+	pr.ToRef.Repository.Project.Key = "SOUR"
+
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		pr   func() *PullRequest
+		err  string
+	}{
+		{
+			name: "timeout",
+			pr:   func() *PullRequest { return pr },
+			ctx:  timeout,
+			err:  "context deadline exceeded",
+		},
+		{
+			name: "ToRef repo not set",
+			pr: func() *PullRequest {
+				pr := *pr
+				pr.ToRef.Repository.Slug = ""
+				return &pr
+			},
+			err: "repository slug empty",
+		},
+		{
+			name: "ToRef project not set",
+			pr: func() *PullRequest {
+				pr := *pr
+				pr.ToRef.Repository.Project.Key = ""
+				return &pr
+			},
+			err: "project key empty",
+		},
+		{
+			name: "success",
+			pr: func() *PullRequest {
+				pr := *pr
+				pr.ID = 63
+				pr.Version = 2
+				return &pr
+			},
+		},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			name := "CreatePullRequestComment-" + strings.ReplaceAll(tc.name, " ", "-")
+
+			cli, save := NewTestClient(t, name, *update)
+			defer save()
+
+			if tc.ctx == nil {
+				tc.ctx = context.Background()
+			}
+
+			if tc.err == "" {
+				tc.err = "<nil>"
+			}
+			tc.err = strings.ReplaceAll(tc.err, "${INSTANCEURL}", instanceURL)
+
+			pr := tc.pr()
+			err := cli.CreatePullRequestComment(tc.ctx, pr, "test_comment")
+			if have, want := fmt.Sprint(err), tc.err; have != want {
+				t.Fatalf("error:\nhave: %q\nwant: %q", have, want)
+			}
 		})
 	}
 }

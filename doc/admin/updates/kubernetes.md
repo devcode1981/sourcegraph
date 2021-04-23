@@ -1,23 +1,75 @@
 # Updating a Kubernetes Sourcegraph instance
 
-This document describes the exact changes needed to update a Kubernetes Sourcegraph instance.
-Follow the [recommended method](../install/kubernetes/update.md) of upgrading a Kubernetes cluster.
+This document describes the exact changes needed to update a Kubernetes Sourcegraph instance. Follow
+the [recommended method](../install/kubernetes/update.md) of upgrading a Kubernetes cluster.
 
-A new version of Sourcegraph is released every month (with patch releases in between, released as needed). Check the [Sourcegraph blog](https://about.sourcegraph.com/blog) or the site admin updates page to learn about updates. We actively maintain the two most recent monthly releases of Sourcegraph.
+A new version of Sourcegraph is released every month on the **20th** (with patch releases in between, released as
+needed). Check the [Sourcegraph blog](https://about.sourcegraph.com/blog) or the site admin updates page to learn about
+updates. We actively maintain the two most recent monthly releases of Sourcegraph.
 
-Upgrades should happen across consecutive minor versions of Sourcegraph. For example, if you are running Sourcegraph 3.1 and want to upgrade to 3.3, you should upgrade to 3.2 and then 3.3.
+Upgrades **must** happen across consecutive minor versions of Sourcegraph. For example, if you are running Sourcegraph
+3.1 and want to upgrade to 3.3, you **must** upgrade to 3.2 and then 3.3.
 
-**Always refer to this page before upgrading Sourcegraph,** as it comprehensively describes the steps needed to upgrade, and any manual migration steps you must perform.
+**Always refer to this page before upgrading Sourcegraph,** as it comprehensively describes the steps needed to upgrade,
+and any manual migration steps you must perform.
 
 <!-- GENERATE UPGRADE GUIDE ON RELEASE (release tooling uses this to add entries) -->
+
+## 3.26 -> 3.27
+
+TODO
+
+*How smooth was this upgrade process for you? You can give us your feedback on this upgrade by filling out [this feedback form](https://share.hsforms.com/1aGeG7ALQQEGO6zyfauIiCA1n7ku?update_version=3.26).*
+
+## 3.26 -> 3.27
+
+> Warning: ⚠️ Sourcegraph 3.27 now requires **Postgres 12+**.
+
+If you are using an external database, [upgrade your database](https://docs.sourcegraph.com/admin/postgres#upgrading-external-postgresql-instances) to Postgres 12 or above prior to upgrading Sourcegraph. No action is required if you are using the supplied supplied database images.
+
+> Warning: ⚠️ We have updated the default replicas for `sourcegraph-frontend` and `precise-code-intel-worker` to `2`. If you use a custom value, make sure you do not merge the replica change.
+
+Afterwards, follow the [standard upgrade method](../install/kubernetes/update.md) to upgrade your deployment.
+
+*How smooth was this upgrade process for you? You can give us your feedback on this upgrade by filling out [this feedback form](https://share.hsforms.com/1aGeG7ALQQEGO6zyfauIiCA1n7ku?update_version=3.26).*
+
+## 3.25 -> 3.26
+
+No manual migration required, follow the [standard upgrade method](../install/kubernetes/update.md) to upgrade your deployment.
+
+> NOTE: ⚠️ From **3.27** onwards we will only support PostgreSQL versions **starting from 12**.
+
+*How smooth was this upgrade process for you? You can give us your feedback on this upgrade by filling out [this feedback form](https://share.hsforms.com/1aGeG7ALQQEGO6zyfauIiCA1n7ku?update_version=3.25).*
+
+## 3.24 -> 3.25
+
+- Go `1.15` introduced changes to SSL/TLS connection validation which requires certificates to include a `SAN`. This field was not included in older certificates and clients relied on the `CN` field. You might see an error like `x509: certificate relies on legacy Common Name field`. We recommend that customers using Sourcegraph with an external database and and connecting to it using SSL/TLS check whether the certificate is up to date.
+  - AWS RDS customers please reference [AWS' documentation on updating the SSL/TLS certificate](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL-certificate-rotation.html) for steps to rotate your certificate.
+
+
+*How smooth was this upgrade process for you? You can give us your feedback on this upgrade by filling out [this feedback form](https://share.hsforms.com/1aGeG7ALQQEGO6zyfauIiCA1n7ku?update_version=3.24).*
+
+## 3.23 -> 3.24
+
+No manual migration required, follow the [standard upgrade method](../install/kubernetes/update.md) to upgrade your deployment.
+
+*How smooth was this upgrade process for you? You can give us your feedback on this upgrade by filling out [this feedback form](https://share.hsforms.com/1aGeG7ALQQEGO6zyfauIiCA1n7ku?update_version=3.23).*
 
 ## 3.22 -> 3.23
 
 No manual migration is required, follow the [standard upgrade method](../install/kubernetes/update.md) to upgrade your deployment.
 
+*How smooth was this upgrade process for you? You can give us your feedback on this upgrade by filling out [this feedback form](https://share.hsforms.com/1aGeG7ALQQEGO6zyfauIiCA1n7ku?update_version=3.22).*
+
 ## 3.21 -> 3.22
 
 No manual migration is required, follow the [standard upgrade method](../install/kubernetes/update.md) to upgrade your deployment.
+
+This upgrade removes the `code intel bundle manager`. This service has been deprecated and all references to it have been removed.
+
+This upgrade also adds a MinIO container that doesn't require any custom configuration. You can find more detailed documentation in https://docs.sourcegraph.com/admin/external_services/object_storage.
+
+*How smooth was this upgrade process for you? You can give us your feedback on this upgrade by filling out [this feedback form](https://share.hsforms.com/1aGeG7ALQQEGO6zyfauIiCA1n7ku?update_version=3.21).*
 
 ## 3.20 -> 3.21
 
@@ -35,9 +87,14 @@ If you had LSIF data uploaded prior to upgrading to 3.21.0, there is a backgroun
 
 **Wait for the above message to be printed in `docker logs precise-code-intel-bundle-manager` before upgrading to the next Sourcegraph version**.
 
+*How smooth was this upgrade process for you? You can give us your feedback on this upgrade by filling out [this feedback form](https://share.hsforms.com/1aGeG7ALQQEGO6zyfauIiCA1n7ku?update_version=3.21).*
+
+
 ## 3.20
 
 No manual migration is required, follow the [standard upgrade method](../install/kubernetes/update.md) to upgrade your deployment.
+
+*How smooth was this upgrade process for you? You can give us your feedback on this upgrade by filling out [this feedback form](https://share.hsforms.com/1aGeG7ALQQEGO6zyfauIiCA1n7ku?update_version=3.20).*
 
 ## 3.19
 
@@ -46,13 +103,19 @@ No manual migration is required, follow the [standard upgrade method](../install
 > Warning: If you use an overlay that does not reference one of the provided overlays, please add `- ../bases/pvcs` as an additional base
 to your `kustomization.yaml` file. Otherwise the PVCs could be pruned if `kubectl apply -prune` is used.
 
+*How smooth was this upgrade process for you? You can give us your feedback on this upgrade by filling out [this feedback form](https://share.hsforms.com/1aGeG7ALQQEGO6zyfauIiCA1n7ku?update_version=3.19).*
+
 ## 3.18
 
 No manual migration is required, follow the [standard upgrade method](../install/kubernetes/update.md) to upgrade your deployment.
 
+*How smooth was this upgrade process for you? You can give us your feedback on this upgrade by filling out [this feedback form](https://share.hsforms.com/1aGeG7ALQQEGO6zyfauIiCA1n7ku?update_version=3.18).*
+
 ## 3.17
 
 No manual migration is required, follow the [standard upgrade method](../install/kubernetes/update.md) to upgrade your deployment.
+
+*How smooth was this upgrade process for you? You can give us your feedback on this upgrade by filling out [this feedback form](https://share.hsforms.com/1aGeG7ALQQEGO6zyfauIiCA1n7ku?update_version=3.17).*
 
 ## 3.16
 
@@ -67,6 +130,8 @@ Note: The following deployments have had their `strategy` changed from `rolling`
 - prometheus
 
 This change was made to avoid two pods writing to the same volume and causing corruption. No special action is needed to apply the change.
+
+*How smooth was this upgrade process for you? You can give us your feedback on this upgrade by filling out [this feedback form](https://share.hsforms.com/1aGeG7ALQQEGO6zyfauIiCA1n7ku?update_version=3.16).*
 
 ## 3.15
 

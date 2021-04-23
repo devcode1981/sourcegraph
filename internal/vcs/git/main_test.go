@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
+
 	"github.com/sourcegraph/sourcegraph/cmd/gitserver/server"
 	"github.com/sourcegraph/sourcegraph/internal/api"
 	"github.com/sourcegraph/sourcegraph/internal/gitserver"
@@ -57,19 +58,24 @@ func init() {
 		log.Fatal(err)
 	}
 
-	srv := &http.Server{Handler: (&server.Server{
-		ReposDir: filepath.Join(root, "repos"),
-		GetRemoteURLFunc: func(ctx context.Context, name api.RepoName) (string, error) {
-			return filepath.Join(root, "remotes", string(name)), nil
-		},
-	}).Handler()}
+	srv := &http.Server{
+		Handler: (&server.Server{
+			ReposDir: filepath.Join(root, "repos"),
+			GetRemoteURLFunc: func(ctx context.Context, name api.RepoName) (string, error) {
+				return filepath.Join(root, "remotes", string(name)), nil
+			},
+			GetVCSSyncer: func(ctx context.Context, name api.RepoName) (server.VCSSyncer, error) {
+				return &server.GitRepoSyncer{}, nil
+			},
+		}).Handler(),
+	}
 	go func() {
 		if err := srv.Serve(l); err != nil {
 			log.Fatal(err)
 		}
 	}()
 
-	gitserver.DefaultClient.Addrs = func(ctx context.Context) []string {
+	gitserver.DefaultClient.Addrs = func() []string {
 		return []string{l.Addr().String()}
 	}
 }
@@ -97,7 +103,7 @@ func InitGitRepository(t testing.TB, cmds ...string) string {
 	if err := os.MkdirAll(remotes, 0700); err != nil {
 		t.Fatal(err)
 	}
-	dir, err := ioutil.TempDir(remotes, t.Name())
+	dir, err := ioutil.TempDir(remotes, strings.ReplaceAll(t.Name(), "/", "__"))
 	if err != nil {
 		t.Fatal(err)
 	}

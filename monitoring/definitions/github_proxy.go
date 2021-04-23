@@ -18,13 +18,12 @@ func GitHubProxy() *monitoring.Container {
 				Rows: []monitoring.Row{
 					{
 						{
-							Name:            "github_proxy_waiting_requests",
-							Description:     "number of requests waiting on the global mutex",
-							Query:           `max(github_proxy_waiting_requests)`,
-							DataMayNotExist: true,
-							Warning:         monitoring.Alert().GreaterOrEqual(100).For(5 * time.Minute),
-							PanelOptions:    monitoring.PanelOptions().LegendFormat("requests waiting"),
-							Owner:           monitoring.ObservableOwnerCloud,
+							Name:        "github_proxy_waiting_requests",
+							Description: "number of requests waiting on the global mutex",
+							Query:       `max(github_proxy_waiting_requests)`,
+							Warning:     monitoring.Alert().GreaterOrEqual(100, nil).For(5 * time.Minute),
+							Panel:       monitoring.Panel().LegendFormat("requests waiting"),
+							Owner:       monitoring.ObservableOwnerCoreApplication,
 							PossibleSolutions: `
 								- **Check github-proxy logs for network connection issues.
 								- **Check github status.`,
@@ -33,49 +32,48 @@ func GitHubProxy() *monitoring.Container {
 				},
 			},
 			{
-				Title:  "Container monitoring (not available on server)",
+				Title:  shared.TitleContainerMonitoring,
 				Hidden: true,
 				Rows: []monitoring.Row{
 					{
-						shared.ContainerCPUUsage("github-proxy", monitoring.ObservableOwnerCloud),
-						shared.ContainerMemoryUsage("github-proxy", monitoring.ObservableOwnerCloud),
+						shared.ContainerCPUUsage("github-proxy", monitoring.ObservableOwnerCoreApplication).Observable(),
+						shared.ContainerMemoryUsage("github-proxy", monitoring.ObservableOwnerCoreApplication).Observable(),
 					},
 					{
-						shared.ContainerRestarts("github-proxy", monitoring.ObservableOwnerCloud),
-						shared.ContainerFsInodes("github-proxy", monitoring.ObservableOwnerCloud),
+						shared.ContainerMissing("github-proxy", monitoring.ObservableOwnerCoreApplication).Observable(),
 					},
 				},
 			},
 			{
-				Title:  "Provisioning indicators (not available on server)",
+				Title:  shared.TitleProvisioningIndicators,
 				Hidden: true,
 				Rows: []monitoring.Row{
 					{
-						shared.ProvisioningCPUUsageLongTerm("github-proxy", monitoring.ObservableOwnerCloud),
-						shared.ProvisioningMemoryUsageLongTerm("github-proxy", monitoring.ObservableOwnerCloud),
+						shared.ProvisioningCPUUsageLongTerm("github-proxy", monitoring.ObservableOwnerCoreApplication).Observable(),
+						shared.ProvisioningMemoryUsageLongTerm("github-proxy", monitoring.ObservableOwnerCoreApplication).Observable(),
 					},
 					{
-						shared.ProvisioningCPUUsageShortTerm("github-proxy", monitoring.ObservableOwnerCloud),
-						shared.ProvisioningMemoryUsageShortTerm("github-proxy", monitoring.ObservableOwnerCloud),
-					},
-				},
-			},
-			{
-				Title:  "Golang runtime monitoring",
-				Hidden: true,
-				Rows: []monitoring.Row{
-					{
-						shared.GoGoroutines("github-proxy", monitoring.ObservableOwnerCloud),
-						shared.GoGcDuration("github-proxy", monitoring.ObservableOwnerCloud),
+						shared.ProvisioningCPUUsageShortTerm("github-proxy", monitoring.ObservableOwnerCoreApplication).Observable(),
+						shared.ProvisioningMemoryUsageShortTerm("github-proxy", monitoring.ObservableOwnerCoreApplication).Observable(),
 					},
 				},
 			},
 			{
-				Title:  "Kubernetes monitoring (ignore if using Docker Compose or server)",
+				Title:  shared.TitleGolangMonitoring,
 				Hidden: true,
 				Rows: []monitoring.Row{
 					{
-						shared.KubernetesPodsAvailable("github-proxy", monitoring.ObservableOwnerCloud),
+						shared.GoGoroutines("github-proxy", monitoring.ObservableOwnerCoreApplication).Observable(),
+						shared.GoGcDuration("github-proxy", monitoring.ObservableOwnerCoreApplication).Observable(),
+					},
+				},
+			},
+			{
+				Title:  shared.TitleKubernetesMonitoring,
+				Hidden: true,
+				Rows: []monitoring.Row{
+					{
+						shared.KubernetesPodsAvailable("github-proxy", monitoring.ObservableOwnerCoreApplication).Observable(),
 					},
 				},
 			},

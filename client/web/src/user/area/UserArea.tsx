@@ -1,30 +1,35 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import MapSearchIcon from 'mdi-react/MapSearchIcon'
 import React, { useMemo, useState } from 'react'
 import { Route, RouteComponentProps, Switch } from 'react-router'
 import { Observable } from 'rxjs'
 import { map, tap } from 'rxjs/operators'
-import { ActivationProps } from '../../../../shared/src/components/activation/Activation'
-import { ExtensionsControllerProps } from '../../../../shared/src/extensions/controller'
-import { gql, dataOrThrowErrors } from '../../../../shared/src/graphql/graphql'
-import { PlatformContextProps } from '../../../../shared/src/platform/context'
-import { SettingsCascadeProps } from '../../../../shared/src/settings/settings'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { ActivationProps } from '@sourcegraph/shared/src/components/activation/Activation'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { gql, dataOrThrowErrors } from '@sourcegraph/shared/src/graphql/graphql'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
+
+import { AuthenticatedUser } from '../../auth'
+import { requestGraphQL } from '../../backend/graphql'
+import { BreadcrumbsProps, BreadcrumbSetters } from '../../components/Breadcrumbs'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { HeroPage } from '../../components/HeroPage'
+import { Page } from '../../components/Page'
+import { UserAreaUserFields, UserAreaResult, UserAreaVariables } from '../../graphql-operations'
 import { NamespaceProps } from '../../namespaces'
-import { ThemeProps } from '../../../../shared/src/theme'
+import { PatternTypeProps, OnboardingTourProps } from '../../search'
+import { UserRepositoriesUpdateProps } from '../../util'
 import { RouteDescriptor } from '../../util/contributions'
+import { EditUserProfilePageGQLFragment } from '../settings/profile/UserSettingsProfilePage'
 import { UserSettingsAreaRoute } from '../settings/UserSettingsArea'
 import { UserSettingsSidebarItems } from '../settings/UserSettingsSidebar'
+
 import { UserAreaHeader, UserAreaHeaderNavItem } from './UserAreaHeader'
-import { PatternTypeProps, OnboardingTourProps } from '../../search'
-import { TelemetryProps } from '../../../../shared/src/telemetry/telemetryService'
-import { AuthenticatedUser } from '../../auth'
-import { UserAreaUserFields, UserAreaResult, UserAreaVariables } from '../../graphql-operations'
-import { BreadcrumbsProps, BreadcrumbSetters } from '../../components/Breadcrumbs'
-import { useObservable } from '../../../../shared/src/util/useObservable'
-import { requestGraphQL } from '../../backend/graphql'
-import { EditUserProfilePageGQLFragment } from '../settings/profile/UserSettingsProfilePage'
 
 /** GraphQL fragment for the User fields needed by UserArea. */
 export const UserAreaGQLFragment = gql`
@@ -96,7 +101,8 @@ interface UserAreaProps
         OnboardingTourProps,
         BreadcrumbsProps,
         BreadcrumbSetters,
-        Omit<PatternTypeProps, 'setPatternType'> {
+        Omit<PatternTypeProps, 'setPatternType'>,
+        UserRepositoriesUpdateProps {
     userAreaRoutes: readonly UserAreaRoute[]
     userAreaHeaderNavItems: readonly UserAreaHeaderNavItem[]
     userSettingsSideBarItems: UserSettingsSidebarItems
@@ -125,7 +131,8 @@ export interface UserAreaRouteContext
         OnboardingTourProps,
         BreadcrumbsProps,
         BreadcrumbSetters,
-        Omit<PatternTypeProps, 'setPatternType'> {
+        Omit<PatternTypeProps, 'setPatternType'>,
+        UserRepositoriesUpdateProps {
     /** The user area main URL. */
     url: string
 
@@ -204,13 +211,8 @@ export const UserArea: React.FunctionComponent<UserAreaProps> = ({
     }
 
     return (
-        <div className="user-area w-100">
-            <UserAreaHeader
-                {...props}
-                {...context}
-                navItems={props.userAreaHeaderNavItems}
-                className="border-bottom mt-4"
-            />
+        <Page className="user-area">
+            <UserAreaHeader {...props} {...context} navItems={props.userAreaHeaderNavItems} className="border-bottom" />
             <div className="container mt-3">
                 <ErrorBoundary location={props.location}>
                     <React.Suspense fallback={<LoadingSpinner className="icon-inline m-2" />}>
@@ -240,6 +242,6 @@ export const UserArea: React.FunctionComponent<UserAreaProps> = ({
                     </React.Suspense>
                 </ErrorBoundary>
             </div>
-        </div>
+        </Page>
     )
 }

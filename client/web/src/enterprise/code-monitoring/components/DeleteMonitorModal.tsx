@@ -1,10 +1,12 @@
 import Dialog from '@reach/dialog'
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import React, { useCallback } from 'react'
 import { Observable, throwError } from 'rxjs'
 import { mergeMap, startWith, tap, catchError } from 'rxjs/operators'
-import { asError, isErrorLike } from '../../../../../shared/src/util/errors'
-import { useEventObservable } from '../../../../../shared/src/util/useObservable'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { asError, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { useEventObservable } from '@sourcegraph/shared/src/util/useObservable'
+
 import { CodeMonitorFormProps } from './CodeMonitorForm'
 
 interface DeleteModalProps extends Pick<CodeMonitorFormProps, 'history' | 'codeMonitor'> {
@@ -59,10 +61,10 @@ export const DeleteMonitorModal: React.FunctionComponent<DeleteModalProps> = ({
 
             <p>
                 <strong>This action cannot be undone.</strong> Code monitoring will no longer watch for trigger event
-                and all actions will immediately be removed. Event history will still be accessible.
+                and all actions will immediately be removed.
             </p>
             {(!deleteCompletedOrError || isErrorLike(deleteCompletedOrError)) && (
-                <div>
+                <div className="text-right">
                     <button type="button" className="btn btn-outline-secondary mr-2" onClick={toggleDeleteModal}>
                         Cancel
                     </button>

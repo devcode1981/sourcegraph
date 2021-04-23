@@ -1,14 +1,15 @@
 import * as React from 'react'
-import { ErrorLike, isErrorLike } from '../../../../../shared/src/util/errors'
+
+import { Scalars } from '@sourcegraph/shared/src/graphql-operations'
+import { ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+
+import { ErrorAlert } from '../../../components/alerts'
 import {
     EXTENSION_NAME_MAX_LENGTH,
     EXTENSION_NAME_VALID_PATTERN,
     publisherName,
     RegistryPublisher,
 } from '../../../extensions/extension/extension'
-import { ErrorAlert } from '../../../components/alerts'
-import * as H from 'history'
-import { Scalars } from '../../../../../shared/src/graphql-operations'
 
 export const RegistryPublisherFormGroup: React.FunctionComponent<{
     className?: string
@@ -21,12 +22,11 @@ export const RegistryPublisherFormGroup: React.FunctionComponent<{
 
     disabled?: boolean
     onChange?: React.FormEventHandler<HTMLSelectElement>
-    history: H.History
-}> = ({ className = '', value, publishersOrError, disabled, onChange, history }) => (
+}> = ({ className = '', value, publishersOrError, disabled, onChange }) => (
     <div className={`form-group ${className}`}>
         <label htmlFor="extension-registry-create-extension-page__publisher">Publisher</label>
         {isErrorLike(publishersOrError) ? (
-            <ErrorAlert error={publishersOrError} history={history} />
+            <ErrorAlert error={publishersOrError} />
         ) : (
             <select
                 id="extension-registry-create-extension-page__publisher"

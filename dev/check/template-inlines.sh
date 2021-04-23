@@ -10,9 +10,10 @@ unset CDPATH
 # Fails and prints matches if any HTML template files contain inline
 # scripts or styles.
 main() {
-  local template_dir=cmd/frontend/internal/app/templates
+  local template_dir=cmd/frontend/internal/app/ui
   if [[ ! -d "${template_dir}" ]]; then
     echo "Could not find directory ${template_dir}; did it move?"
+    echo "^^^ +++"
     exit 1
   fi
   local found
@@ -28,6 +29,7 @@ main() {
     echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
     echo '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
     echo "$found"
+    echo "^^^ +++"
     exit 1
   fi
 

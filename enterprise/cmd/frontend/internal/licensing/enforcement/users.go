@@ -8,15 +8,16 @@ import (
 
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/envvar"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/licensing"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbutil"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	"github.com/sourcegraph/sourcegraph/internal/errcode"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 )
 
 // NewBeforeCreateUserHook returns a BeforeCreateUserHook closure with the given UsersStore
 // that determines whether new user is allowed to be created.
-func NewBeforeCreateUserHook(s licensing.UsersStore) func(context.Context) error {
-	return func(ctx context.Context) error {
+func NewBeforeCreateUserHook() func(context.Context, dbutil.DB) error {
+	return func(ctx context.Context, db dbutil.DB) error {
 		info, err := licensing.GetConfiguredProductLicenseInfo()
 		if err != nil {
 			return err
@@ -35,7 +36,7 @@ func NewBeforeCreateUserHook(s licensing.UsersStore) func(context.Context) error
 		}
 
 		// Block creation of a new user beyond the licensed user count (unless true-up is allowed).
-		userCount, err := s.Count(ctx)
+		userCount, err := database.Users(db).Count(ctx, nil)
 		if err != nil {
 			return err
 		}
@@ -76,11 +77,9 @@ func NewAfterCreateUserHook() func(context.Context, dbutil.DB, *types.User) erro
 
 		// Nil info indicates no license, thus Free tier
 		if info == nil {
+			store := database.Users(tx)
 			user.SiteAdmin = true
-			// TODO: Use db.Users.SetIsSiteAdmin when it migrated to have `*basestore.Store`
-			//  and support `With` method.
-			_, err := tx.ExecContext(ctx, "UPDATE users SET site_admin=$1 WHERE id=$2", user.SiteAdmin, user.ID)
-			if err != nil {
+			if err := store.SetIsSiteAdmin(ctx, user.ID, user.SiteAdmin); err != nil {
 				return err
 			}
 		}

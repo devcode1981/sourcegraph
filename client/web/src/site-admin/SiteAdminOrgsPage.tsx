@@ -1,3 +1,4 @@
+import * as H from 'history'
 import AddIcon from 'mdi-react/AddIcon'
 import DeleteIcon from 'mdi-react/DeleteIcon'
 import SettingsIcon from 'mdi-react/SettingsIcon'
@@ -6,16 +7,18 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { RouteComponentProps } from 'react-router'
 import { Link } from 'react-router-dom'
 import { Subject } from 'rxjs'
-import { pluralize } from '../../../shared/src/util/strings'
+
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { asError, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { pluralize } from '@sourcegraph/shared/src/util/strings'
+
+import { ErrorAlert } from '../components/alerts'
 import { FilteredConnection } from '../components/FilteredConnection'
 import { PageTitle } from '../components/PageTitle'
-import { orgURL } from '../org'
-import { deleteOrganization, fetchAllOrganizations } from './backend'
-import { ErrorAlert } from '../components/alerts'
-import { asError, isErrorLike } from '../../../shared/src/util/errors'
-import * as H from 'history'
 import { OrganizationFields } from '../graphql-operations'
-import { TelemetryProps } from '../../../shared/src/telemetry/telemetryService'
+import { orgURL } from '../org'
+
+import { deleteOrganization, fetchAllOrganizations } from './backend'
 
 interface OrgNodeProps {
     /**
@@ -92,7 +95,7 @@ const OrgNode: React.FunctionComponent<OrgNodeProps> = ({ node, history, onDidUp
                     </button>
                 </div>
             </div>
-            {isErrorLike(loading) && <ErrorAlert className="mt-2" error={loading.message} history={history} />}
+            {isErrorLike(loading) && <ErrorAlert className="mt-2" error={loading.message} />}
         </li>
     )
 }
@@ -121,7 +124,7 @@ export const SiteAdminOrgsPage: React.FunctionComponent<Props> = ({ telemetrySer
             </div>
             <p>
                 An organization is a set of users with associated configuration. See{' '}
-                <Link to="/help/user/organizations">Sourcegraph documentation</Link> for information about configuring
+                <Link to="/help/admin/organizations">Sourcegraph documentation</Link> for information about configuring
                 organizations.
             </p>
             <FilteredConnection<OrganizationFields, Omit<OrgNodeProps, 'node'>>

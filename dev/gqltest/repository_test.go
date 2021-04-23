@@ -1,5 +1,3 @@
-// +build gqltest
-
 package main
 
 import (
@@ -66,6 +64,7 @@ func TestRepository(t *testing.T) {
 			{
 				URL:         "https://ghe.sgdev.org/sgtest/go-diff/blob/3f415a150aec0685cb81b73cc201e762e075006d/diff/parse.go",
 				ServiceType: extsvc.TypeGitHub,
+				ServiceKind: extsvc.KindGitHub,
 			},
 		}
 		if diff := cmp.Diff(want, got); diff != "" {
@@ -118,6 +117,7 @@ func TestRepository_NameWithSpace(t *testing.T) {
 	}
 
 	want := &gqltestutil.Repository{
+		ID:  got.ID,
 		URL: "/sourcegraph.visualstudio.com/Test%20Repo",
 	}
 	if diff := cmp.Diff(want, got); diff != "" {

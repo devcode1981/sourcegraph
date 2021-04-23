@@ -142,8 +142,9 @@ func TestSerializeBasic(t *testing.T) {
 		HasExtURL:            false,
 		UniqueUsers:          123,
 		Activity:             json.RawMessage([]byte(`{"foo":"bar"}`)),
-		CampaignsUsage:       nil,
+		BatchChangesUsage:    nil,
 		CodeIntelUsage:       nil,
+		CodeMonitoringUsage:  nil,
 		SearchUsage:          nil,
 		GrowthStatistics:     nil,
 		SavedSearches:        nil,
@@ -171,10 +172,13 @@ func TestSerializeBasic(t *testing.T) {
 		"has_update": "true",
 		"unique_users_today": "123",
 		"site_activity": {"foo":"bar"},
-		"automation_usage": null,
+		"batch_changes_usage": null,
 		"code_intel_usage": null,
 		"new_code_intel_usage": null,
 		"dependency_versions": null,
+		"extensions_usage": null,
+		"code_insights_usage": null,
+		"code_monitoring_usage": null,
 		"search_usage": null,
 		"growth_statistics": null,
 		"saved_searches": null,
@@ -231,10 +235,13 @@ func TestSerializeFromQuery(t *testing.T) {
 		"has_update": "true",
 		"unique_users_today": "123",
 		"site_activity": {"foo":"bar"},
-		"automation_usage": null,
+		"batch_changes_usage": null,
 		"code_intel_usage": null,
 		"new_code_intel_usage": null,
 		"dependency_versions": null,
+		"extensions_usage": null,
+		"code_insights_usage": null,
+		"code_monitoring_usage": null,
 		"search_usage": null,
 		"growth_statistics": null,
 		"saved_searches": null,
@@ -267,8 +274,9 @@ func TestSerializeAutomationUsage(t *testing.T) {
 		HasExtURL:            false,
 		UniqueUsers:          123,
 		Activity:             json.RawMessage([]byte(`{"foo":"bar"}`)),
-		CampaignsUsage:       json.RawMessage([]byte(`{"baz":"bonk"}`)),
+		BatchChangesUsage:    json.RawMessage([]byte(`{"baz":"bonk"}`)),
 		CodeIntelUsage:       nil,
+		CodeMonitoringUsage:  nil,
 		NewCodeIntelUsage:    nil,
 		SearchUsage:          nil,
 		GrowthStatistics:     nil,
@@ -297,10 +305,13 @@ func TestSerializeAutomationUsage(t *testing.T) {
 		"has_update": "true",
 		"unique_users_today": "123",
 		"site_activity": {"foo":"bar"},
-		"automation_usage": {"baz":"bonk"},
+		"batch_changes_usage": {"baz":"bonk"},
 		"code_intel_usage": null,
 		"new_code_intel_usage": null,
 		"dependency_versions": null,
+		"extensions_usage": null,
+		"code_insights_usage": null,
+		"code_monitoring_usage": null,
 		"search_usage": null,
 		"growth_statistics": null,
 		"saved_searches": null,
@@ -324,10 +335,17 @@ func TestSerializeAutomationUsage(t *testing.T) {
 
 func TestSerializeCodeIntelUsage(t *testing.T) {
 	now := time.Unix(1587396557, 0).UTC()
+	waus1 := int32(25)
+	waus2 := int32(10)
+	waus3 := int32(40)
+	withUploads := int32(50)
+	withoutUploads := int32(85)
 
 	testUsage, err := json.Marshal(types.NewCodeIntelUsageStatistics{
-		StartOfWeek: now,
-		WAUs:        25,
+		StartOfWeek:                now,
+		WAUs:                       &waus1,
+		SearchBasedWAUs:            &waus2,
+		PreciseCrossRepositoryWAUs: &waus3,
 		EventSummaries: []types.CodeIntelEventSummary{
 			{
 				Action:          types.HoverAction,
@@ -378,6 +396,8 @@ func TestSerializeCodeIntelUsage(t *testing.T) {
 				TotalActions:    3,
 			},
 		},
+		NumRepositoriesWithUploadRecords:    &withUploads,
+		NumRepositoriesWithoutUploadRecords: &withoutUploads,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error %s", err)
@@ -393,8 +413,9 @@ func TestSerializeCodeIntelUsage(t *testing.T) {
 		HasExtURL:            false,
 		UniqueUsers:          123,
 		Activity:             json.RawMessage([]byte(`{"foo":"bar"}`)),
-		CampaignsUsage:       nil,
+		BatchChangesUsage:    nil,
 		CodeIntelUsage:       nil,
+		CodeMonitoringUsage:  nil,
 		NewCodeIntelUsage:    testUsage,
 		SearchUsage:          nil,
 		GrowthStatistics:     nil,
@@ -422,11 +443,16 @@ func TestSerializeCodeIntelUsage(t *testing.T) {
 		"has_update": "true",
 		"unique_users_today": "123",
 		"site_activity": {"foo":"bar"},
-		"automation_usage": null,
+		"batch_changes_usage": null,
 		"code_intel_usage": null,
 		"new_code_intel_usage": {
 			"start_time": "2020-04-20T15:29:17Z",
 			"waus": 25,
+			"precise_waus": null,
+			"search_waus": 10,
+			"xrepo_waus": null,
+			"precise_xrepo_waus": 40,
+			"search_xrepo_waus": null,
 			"event_summaries": [
 				{
 					"action": "hover",
@@ -476,9 +502,14 @@ func TestSerializeCodeIntelUsage(t *testing.T) {
 					"waus": 6,
 					"total_actions": 3
 				}
-			]
+			],
+			"num_repositories_with_upload_records": 50,
+			"num_repositories_without_upload_records": 85
 		},
+		"code_monitoring_usage": null,
 		"dependency_versions": null,
+		"extensions_usage": null,
+		"code_insights_usage": null,
 		"search_usage": null,
 		"growth_statistics": null,
 		"saved_searches": null,
@@ -537,8 +568,9 @@ func TestSerializeOldCodeIntelUsage(t *testing.T) {
 		HasExtURL:            false,
 		UniqueUsers:          123,
 		Activity:             json.RawMessage([]byte(`{"foo":"bar"}`)),
-		CampaignsUsage:       nil,
+		BatchChangesUsage:    nil,
 		CodeIntelUsage:       json.RawMessage([]byte(`{"Weekly": [` + period + `]}`)),
+		CodeMonitoringUsage:  nil,
 		NewCodeIntelUsage:    nil,
 		SearchUsage:          nil,
 		GrowthStatistics:     nil,
@@ -566,11 +598,16 @@ func TestSerializeOldCodeIntelUsage(t *testing.T) {
 		"has_update": "true",
 		"unique_users_today": "123",
 		"site_activity": {"foo":"bar"},
-		"automation_usage": null,
+		"batch_changes_usage": null,
 		"code_intel_usage": null,
 		"new_code_intel_usage": {
 			"start_time": "2020-04-20T15:29:17Z",
 			"waus": null,
+			"precise_waus": null,
+			"search_waus": null,
+			"xrepo_waus": null,
+			"precise_xrepo_waus": null,
+			"search_xrepo_waus": null,
 			"event_summaries": [
 				{
 					"action": "hover",
@@ -620,9 +657,14 @@ func TestSerializeOldCodeIntelUsage(t *testing.T) {
 					"waus": 6,
 					"total_actions": 3
 				}
-			]
+			],
+			"num_repositories_with_upload_records": null,
+			"num_repositories_without_upload_records": null
 		},
+		"code_monitoring_usage": null,
 		"dependency_versions": null,
+		"extensions_usage": null,
+		"code_insights_usage": null,
 		"search_usage": null,
 		"growth_statistics": null,
 		"saved_searches": null,

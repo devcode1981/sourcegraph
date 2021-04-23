@@ -1,15 +1,16 @@
-import React, { useCallback } from 'react'
+import React, { useCallback, useMemo } from 'react'
 import { RouteComponentProps } from 'react-router'
 import { Observable } from 'rxjs'
 import { map } from 'rxjs/operators'
-import { Link } from '../../../../../shared/src/components/Link'
-import { dataOrThrowErrors, gql } from '../../../../../shared/src/graphql/graphql'
+
+import { Link } from '@sourcegraph/shared/src/components/Link'
+import { dataOrThrowErrors, gql } from '@sourcegraph/shared/src/graphql/graphql'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+
 import { requestGraphQL } from '../../../backend/graphql'
 import { FilteredConnection } from '../../../components/FilteredConnection'
 import { PageTitle } from '../../../components/PageTitle'
 import { Timestamp } from '../../../components/time/Timestamp'
-import { TelemetryProps } from '../../../../../shared/src/telemetry/telemetryService'
-import { useMemo } from '@storybook/addons'
 import {
     UserEventLogFields,
     UserEventLogsConnectionFields,

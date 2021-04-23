@@ -1,11 +1,13 @@
-import '../../../../shared/src/polyfills'
+import '@sourcegraph/shared/src/polyfills'
 
-import { setLinkComponent, AnchorLink } from '../../../../shared/src/components/Link'
+import { setLinkComponent, AnchorLink } from '@sourcegraph/shared/src/components/Link'
+
+import { getPhabricatorCSS, getSourcegraphURLFromConduit } from '../../shared/code-hosts/phabricator/backend'
 import { injectCodeIntelligence } from '../../shared/code-hosts/shared/inject'
 import { injectExtensionMarker } from '../../shared/code-hosts/sourcegraph/inject'
-import { getPhabricatorCSS, getSourcegraphURLFromConduit } from '../../shared/code-hosts/phabricator/backend'
-import { metaClickOverride } from './util'
 import { getAssetsURL } from '../../shared/util/context'
+
+import { metaClickOverride } from './util'
 
 // Just for informational purposes (see getPlatformContext())
 window.SOURCEGRAPH_PHABRICATOR_EXTENSION = true
@@ -39,7 +41,7 @@ async function init(): Promise<void> {
     // so we do not need to do this here.
     if (!window.SOURCEGRAPH_BUNDLE_URL && !window.localStorage.getItem('SOURCEGRAPH_BUNDLE_URL')) {
         injectExtensionMarker()
-        injectCodeIntelligence({ sourcegraphURL, assetsURL }, IS_EXTENSION)
+        await injectCodeIntelligence({ sourcegraphURL, assetsURL }, IS_EXTENSION)
         metaClickOverride()
         return
     }
@@ -54,7 +56,7 @@ async function init(): Promise<void> {
     window.localStorage.setItem('SOURCEGRAPH_URL', sourcegraphURL)
     metaClickOverride()
     injectExtensionMarker()
-    injectCodeIntelligence({ sourcegraphURL, assetsURL }, IS_EXTENSION)
+    await injectCodeIntelligence({ sourcegraphURL, assetsURL }, IS_EXTENSION)
 }
 
 init().catch(error => console.error('Error initializing Phabricator integration', error))

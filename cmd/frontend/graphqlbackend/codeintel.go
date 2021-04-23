@@ -2,7 +2,6 @@ package graphqlbackend
 
 import (
 	"context"
-	"errors"
 
 	"github.com/graph-gophers/graphql-go"
 
@@ -15,84 +14,18 @@ type CodeIntelResolver interface {
 	LSIFUploadByID(ctx context.Context, id graphql.ID) (LSIFUploadResolver, error)
 	LSIFUploads(ctx context.Context, args *LSIFUploadsQueryArgs) (LSIFUploadConnectionResolver, error)
 	LSIFUploadsByRepo(ctx context.Context, args *LSIFRepositoryUploadsQueryArgs) (LSIFUploadConnectionResolver, error)
-	DeleteLSIFUpload(ctx context.Context, id graphql.ID) (*EmptyResponse, error)
+	DeleteLSIFUpload(ctx context.Context, args *struct{ ID graphql.ID }) (*EmptyResponse, error)
 	LSIFIndexByID(ctx context.Context, id graphql.ID) (LSIFIndexResolver, error)
 	LSIFIndexes(ctx context.Context, args *LSIFIndexesQueryArgs) (LSIFIndexConnectionResolver, error)
 	LSIFIndexesByRepo(ctx context.Context, args *LSIFRepositoryIndexesQueryArgs) (LSIFIndexConnectionResolver, error)
-	DeleteLSIFIndex(ctx context.Context, id graphql.ID) (*EmptyResponse, error)
+	DeleteLSIFIndex(ctx context.Context, args *struct{ ID graphql.ID }) (*EmptyResponse, error)
 	IndexConfiguration(ctx context.Context, id graphql.ID) (IndexConfigurationResolver, error) // TODO - rename ...ForRepo
 	UpdateRepositoryIndexConfiguration(ctx context.Context, args *UpdateRepositoryIndexConfigurationArgs) (*EmptyResponse, error)
+	CommitGraph(ctx context.Context, id graphql.ID) (CodeIntelligenceCommitGraphResolver, error)
+	QueueAutoIndexJobForRepo(ctx context.Context, args *struct{ Repository graphql.ID }) (*EmptyResponse, error)
 	GitBlobLSIFData(ctx context.Context, args *GitBlobLSIFDataArgs) (GitBlobLSIFDataResolver, error)
-}
 
-var codeIntelOnlyInEnterprise = errors.New("precise code intelligence only available in enterprise")
-
-type defaultCodeIntelResolver struct{}
-
-var DefaultCodeIntelResolver CodeIntelResolver = defaultCodeIntelResolver{}
-
-func (defaultCodeIntelResolver) LSIFUploadByID(ctx context.Context, id graphql.ID) (LSIFUploadResolver, error) {
-	return nil, codeIntelOnlyInEnterprise
-}
-
-func (defaultCodeIntelResolver) LSIFUploads(ctx context.Context, args *LSIFUploadsQueryArgs) (LSIFUploadConnectionResolver, error) {
-	return nil, codeIntelOnlyInEnterprise
-}
-
-func (defaultCodeIntelResolver) LSIFUploadsByRepo(ctx context.Context, args *LSIFRepositoryUploadsQueryArgs) (LSIFUploadConnectionResolver, error) {
-	return nil, codeIntelOnlyInEnterprise
-}
-
-func (defaultCodeIntelResolver) DeleteLSIFUpload(ctx context.Context, id graphql.ID) (*EmptyResponse, error) {
-	return nil, codeIntelOnlyInEnterprise
-}
-
-func (defaultCodeIntelResolver) LSIFIndexByID(ctx context.Context, id graphql.ID) (LSIFIndexResolver, error) {
-	return nil, codeIntelOnlyInEnterprise
-}
-
-func (defaultCodeIntelResolver) LSIFIndexes(ctx context.Context, args *LSIFIndexesQueryArgs) (LSIFIndexConnectionResolver, error) {
-	return nil, codeIntelOnlyInEnterprise
-}
-
-func (defaultCodeIntelResolver) LSIFIndexesByRepo(ctx context.Context, args *LSIFRepositoryIndexesQueryArgs) (LSIFIndexConnectionResolver, error) {
-	return nil, codeIntelOnlyInEnterprise
-}
-
-func (defaultCodeIntelResolver) DeleteLSIFIndex(ctx context.Context, id graphql.ID) (*EmptyResponse, error) {
-	return nil, codeIntelOnlyInEnterprise
-}
-
-func (defaultCodeIntelResolver) IndexConfiguration(ctx context.Context, id graphql.ID) (IndexConfigurationResolver, error) {
-	return nil, codeIntelOnlyInEnterprise
-}
-
-func (defaultCodeIntelResolver) UpdateRepositoryIndexConfiguration(ctx context.Context, args *UpdateRepositoryIndexConfigurationArgs) (*EmptyResponse, error) {
-	return nil, codeIntelOnlyInEnterprise
-}
-
-func (defaultCodeIntelResolver) GitBlobLSIFData(ctx context.Context, args *GitBlobLSIFDataArgs) (GitBlobLSIFDataResolver, error) {
-	return nil, codeIntelOnlyInEnterprise
-}
-
-func (r *schemaResolver) LSIFUploads(ctx context.Context, args *LSIFUploadsQueryArgs) (LSIFUploadConnectionResolver, error) {
-	return r.CodeIntelResolver.LSIFUploads(ctx, args)
-}
-
-func (r *schemaResolver) LSIFIndexes(ctx context.Context, args *LSIFIndexesQueryArgs) (LSIFIndexConnectionResolver, error) {
-	return r.CodeIntelResolver.LSIFIndexes(ctx, args)
-}
-
-func (r *schemaResolver) DeleteLSIFUpload(ctx context.Context, args *struct{ ID graphql.ID }) (*EmptyResponse, error) {
-	return r.CodeIntelResolver.DeleteLSIFUpload(ctx, args.ID)
-}
-
-func (r *schemaResolver) DeleteLSIFIndex(ctx context.Context, args *struct{ ID graphql.ID }) (*EmptyResponse, error) {
-	return r.CodeIntelResolver.DeleteLSIFIndex(ctx, args.ID)
-}
-
-func (r *schemaResolver) UpdateRepositoryIndexConfigurationArgs(ctx context.Context, args *UpdateRepositoryIndexConfigurationArgs) (*EmptyResponse, error) {
-	return r.CodeIntelResolver.UpdateRepositoryIndexConfiguration(ctx, args)
+	NodeResolvers() map[string]NodeByIDFunc
 }
 
 type LSIFUploadsQueryArgs struct {
@@ -201,8 +134,17 @@ type UpdateRepositoryIndexConfigurationArgs struct {
 	Configuration string
 }
 
+type QueueAutoIndexJobArgs struct {
+	Repository graphql.ID
+}
+
 type GitTreeLSIFDataResolver interface {
 	Diagnostics(ctx context.Context, args *LSIFDiagnosticsArgs) (DiagnosticConnectionResolver, error)
+}
+
+type CodeIntelligenceCommitGraphResolver interface {
+	Stale(ctx context.Context) (bool, error)
+	UpdatedAt(ctx context.Context) (*DateTime, error)
 }
 
 type GitBlobLSIFDataResolver interface {

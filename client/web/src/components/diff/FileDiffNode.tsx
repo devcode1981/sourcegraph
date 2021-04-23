@@ -1,20 +1,22 @@
-import { Hoverifier } from '@sourcegraph/codeintellify'
-import * as H from 'history'
-import prettyBytes from 'pretty-bytes'
-import ChevronDownIcon from 'mdi-react/ChevronDownIcon'
-import React, { useState, useCallback } from 'react'
-import { ActionItemAction } from '../../../../shared/src/actions/ActionItem'
-import { HoverMerged } from '../../../../shared/src/api/client/types/hover'
-import { FileSpec, RepoSpec, ResolvedRevisionSpec, RevisionSpec } from '../../../../shared/src/util/url'
-import { DiffStat } from './DiffStat'
-import { FileDiffHunks } from './FileDiffHunks'
-import { ThemeProps } from '../../../../shared/src/theme'
-import { ExtensionsControllerProps } from '../../../../shared/src/extensions/controller'
-import ChevronRightIcon from 'mdi-react/ChevronRightIcon'
 import classNames from 'classnames'
+import * as H from 'history'
+import ChevronDownIcon from 'mdi-react/ChevronDownIcon'
+import ChevronRightIcon from 'mdi-react/ChevronRightIcon'
+import prettyBytes from 'pretty-bytes'
+import React, { useState, useCallback } from 'react'
+import { Observable } from 'rxjs'
+
+import { ViewerId } from '@sourcegraph/shared/src/api/viewerTypes'
+import { Link } from '@sourcegraph/shared/src/components/Link'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+
+import { FileDiffFields } from '../../graphql-operations'
+import { DiffMode } from '../../repo/commit/RepositoryCommitPage'
 import { dirname } from '../../util/path'
-import { FileDiffFields, Scalars } from '../../graphql-operations'
-import { Link } from '../../../../shared/src/components/Link'
+
+import { DiffStat } from './DiffStat'
+import { ExtensionInfo } from './FileDiffConnection'
+import { FileDiffHunks } from './FileDiffHunks'
 
 export interface FileDiffNodeProps extends ThemeProps {
     node: FileDiffFields
@@ -23,18 +25,22 @@ export interface FileDiffNodeProps extends ThemeProps {
     location: H.Location
     history: H.History
 
-    extensionInfo?: {
-        /** The base repository and revision. */
-        base: RepoSpec & RevisionSpec & ResolvedRevisionSpec & { repoID: Scalars['ID'] }
+    // extensionInfo?: {
+    //     /** The base repository and revision. */
+    //     base: RepoSpec & RevisionSpec & ResolvedRevisionSpec & { repoID: Scalars['ID'] }
 
-        /** The head repository and revision. */
-        head: RepoSpec & RevisionSpec & ResolvedRevisionSpec & { repoID: Scalars['ID'] }
+    //     /** The head repository and revision. */
+    //     head: RepoSpec & RevisionSpec & ResolvedRevisionSpec & { repoID: Scalars['ID'] }
 
-        hoverifier: Hoverifier<RepoSpec & RevisionSpec & FileSpec & ResolvedRevisionSpec, HoverMerged, ActionItemAction>
-    } & ExtensionsControllerProps
+    //     hoverifier: Hoverifier<RepoSpec & RevisionSpec & FileSpec & ResolvedRevisionSpec, HoverMerged, ActionItemAction>
+    // } & ExtensionsControllerProps
+    extensionInfo?: ExtensionInfo<{
+        observeViewerId?: (uri: string) => Observable<ViewerId | undefined>
+    }>
 
     /** Reflect selected line in url */
     persistLines?: boolean
+    diffMode?: DiffMode
 }
 
 /** A file diff. */
@@ -47,6 +53,7 @@ export const FileDiffNode: React.FunctionComponent<FileDiffNodeProps> = ({
     className,
     extensionInfo,
     persistLines,
+    diffMode = 'unified',
 }) => {
     const [expanded, setExpanded] = useState<boolean>(true)
     const [renderDeleted, setRenderDeleted] = useState<boolean>(false)
@@ -97,7 +104,9 @@ export const FileDiffNode: React.FunctionComponent<FileDiffNodeProps> = ({
 
     return (
         <>
-            <a id={anchor} />
+            {/* The empty <a> tag is to allow users to anchor links to the top of this file diff node */}
+            {/* eslint-disable-next-line jsx-a11y/anchor-has-content, jsx-a11y/anchor-is-valid */}
+            <a id={anchor} aria-hidden={true} />
             <div className={`file-diff-node test-file-diff-node card ${className || ''}`}>
                 <div className="card-header file-diff-node__header">
                     <button type="button" className="btn btn-sm btn-icon mr-2" onClick={toggleExpand}>
@@ -153,7 +162,9 @@ export const FileDiffNode: React.FunctionComponent<FileDiffNodeProps> = ({
                             persistLines={persistLines}
                             extensionInfo={
                                 extensionInfo && {
-                                    ...extensionInfo,
+                                    extensionsController: extensionInfo.extensionsController,
+                                    observeViewerId: extensionInfo.observeViewerId,
+                                    hoverifier: extensionInfo.hoverifier,
                                     base: {
                                         ...extensionInfo.base,
                                         filePath: node.oldPath,
@@ -166,6 +177,7 @@ export const FileDiffNode: React.FunctionComponent<FileDiffNodeProps> = ({
                             }
                             hunks={node.hunks}
                             lineNumbers={lineNumbers}
+                            diffMode={diffMode}
                         />
                     ))}
             </div>

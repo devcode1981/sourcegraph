@@ -1,7 +1,9 @@
 import React from 'react'
 import { MemoryRouter } from 'react-router'
 import renderer from 'react-test-renderer'
-import { PlatformContext } from '../../../shared/src/platform/context'
+
+import { PlatformContext } from '@sourcegraph/shared/src/platform/context'
+
 import { ExtensionCard } from './ExtensionCard'
 
 describe('ExtensionCard', () => {
@@ -34,6 +36,7 @@ describe('ExtensionCard', () => {
                             platformContext={NOOP_PLATFORM_CONTEXT}
                             enabled={false}
                             isLightTheme={false}
+                            settingsURL="/settings/foobar"
                         />
                     </MemoryRouter>
                 )

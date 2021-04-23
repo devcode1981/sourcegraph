@@ -1,27 +1,38 @@
 import { Shortcut } from '@slimsag/react-shortcuts'
 import classNames from 'classnames'
+import { Remote } from 'comlink'
 import * as H from 'history'
 import { sortBy, uniq, uniqueId } from 'lodash'
-import MenuDownIcon from 'mdi-react/MenuDownIcon'
 import ConsoleIcon from 'mdi-react/ConsoleIcon'
+import MenuDownIcon from 'mdi-react/MenuDownIcon'
 import MenuUpIcon from 'mdi-react/MenuUpIcon'
+import PuzzleIcon from 'mdi-react/PuzzleIcon'
 import React, { useCallback, useMemo, useState } from 'react'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import TooltipPopoverWrapper from 'reactstrap/lib/TooltipPopoverWrapper'
-import { Subscription } from 'rxjs'
+import { from, Subscription } from 'rxjs'
+import { filter, switchMap } from 'rxjs/operators'
 import stringScore from 'string-score'
 import { Key } from 'ts-key-enum'
-import { KeyboardShortcut } from '../keyboardShortcuts'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+
 import { ActionItem, ActionItemAction } from '../actions/ActionItem'
+import { wrapRemoteObservable } from '../api/client/api/common'
+import { FlatExtensionHostAPI } from '../api/contract'
+import { haveInitialExtensionsLoaded } from '../api/features'
 import { ContributableMenu, Contributions, Evaluated } from '../api/protocol'
 import { HighlightedMatches } from '../components/HighlightedMatches'
 import { getContributedActionItems } from '../contributions/contributions'
 import { ExtensionsControllerProps } from '../extensions/controller'
+import { KeyboardShortcut } from '../keyboardShortcuts'
 import { PlatformContextProps } from '../platform/context'
-import { TelemetryProps } from '../telemetry/telemetryService'
-import { EmptyCommandList } from './EmptyCommandList'
 import { SettingsCascadeOrError } from '../settings/settings'
+import { TelemetryProps } from '../telemetry/telemetryService'
+import { memoizeObservable } from '../util/memoizeObservable'
+
+import { EmptyCommandList } from './EmptyCommandList'
 
 /**
  * Customizable CSS classes for elements of the the command list button.
@@ -55,7 +66,7 @@ export interface CommandListClassProps {
 
 export interface CommandListProps
     extends CommandListClassProps,
-        ExtensionsControllerProps<'services' | 'executeCommand'>,
+        ExtensionsControllerProps<'executeCommand' | 'extHostAPI'>,
         PlatformContextProps<'forceUpdateTooltip' | 'settings' | 'sourcegraphURL'>,
         TelemetryProps {
     /** The menu whose commands to display. */
@@ -81,6 +92,13 @@ interface State {
 
     settingsCascade?: SettingsCascadeOrError
 }
+
+// Memoize contributions to prevent flashing loading spinners on subsequent mounts
+const getContributions = memoizeObservable(
+    (extensionHostAPI: Promise<Remote<FlatExtensionHostAPI>>) =>
+        from(extensionHostAPI).pipe(switchMap(extensionHost => wrapRemoteObservable(extensionHost.getContributions()))),
+    () => 'getContributions' // only one instance
+)
 
 /** Displays a list of commands contributed by extensions for a specific menu. */
 export class CommandList extends React.PureComponent<CommandListProps, State> {
@@ -131,9 +149,15 @@ export class CommandList extends React.PureComponent<CommandListProps, State> {
 
     public componentDidMount(): void {
         this.subscriptions.add(
-            this.props.extensionsController.services.contribution
-                .getContributions()
-                .subscribe(contributions => this.setState({ contributions }))
+            // Don't listen for subscriptions until all initial extensions have loaded (to prevent UI jitter)
+            haveInitialExtensionsLoaded(this.props.extensionsController.extHostAPI)
+                .pipe(
+                    filter(haveLoaded => haveLoaded),
+                    switchMap(() => getContributions(this.props.extensionsController.extHostAPI))
+                )
+                .subscribe(contributions => {
+                    this.setState({ contributions })
+                })
         )
 
         this.subscriptions.add(
@@ -159,7 +183,15 @@ export class CommandList extends React.PureComponent<CommandListProps, State> {
 
     public render(): JSX.Element | null {
         if (!this.state.contributions) {
-            return null
+            return (
+                <div className="command-list empty-command-list">
+                    <div className="d-flex py-5 align-items-center justify-content-center">
+                        <LoadingSpinner />
+                        <span className="mx-2">Loading Sourcegraph extensions</span>
+                        <PuzzleIcon className="icon-inline" />
+                    </div>
+                </div>
+            )
         }
 
         const allItems = getContributedActionItems(this.state.contributions, this.props.menu)
@@ -287,7 +319,7 @@ export class CommandList extends React.PureComponent<CommandListProps, State> {
 }
 
 export function filterAndRankItems(
-    items: Pick<ActionItemAction, 'action'>[],
+    items: Pick<ActionItemAction, 'action' | 'active'>[],
     query: string,
     recentActions: string[] | null
 ): ActionItemAction[] {

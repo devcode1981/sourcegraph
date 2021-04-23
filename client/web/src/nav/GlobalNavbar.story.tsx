@@ -1,16 +1,20 @@
-import React from 'react'
-import { createMemoryHistory } from 'history'
 import { storiesOf } from '@storybook/react'
-import { WebStory } from '../components/WebStory'
-import { GlobalNavbar } from './GlobalNavbar'
-import { NOOP_TELEMETRY_SERVICE } from '../../../shared/src/telemetry/telemetryService'
-import { ThemePreference } from '../theme'
-import { ThemeProps } from '../../../shared/src/theme'
-import { SearchPatternType } from '../graphql-operations'
-import { Services } from '../../../shared/src/api/client/services'
-import { SourcegraphContext } from '../jscontext'
+import { createMemoryHistory } from 'history'
 import { SuiteFunction } from 'mocha'
+import React from 'react'
+
+import { NOOP_TELEMETRY_SERVICE } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { extensionsController } from '@sourcegraph/shared/src/util/searchTestHelpers'
+
 import { AuthenticatedUser } from '../auth'
+import { WebStory } from '../components/WebStory'
+import { SearchPatternType } from '../graphql-operations'
+import { SourcegraphContext } from '../jscontext'
+import { mockFetchAutoDefinedSearchContexts, mockFetchSearchContexts } from '../searchContexts/testHelpers'
+import { ThemePreference } from '../theme'
+
+import { GlobalNavbar } from './GlobalNavbar'
 
 window.context = { assetsRoot: 'https://sourcegraph.com/.assets' } as SourcegraphContext & SuiteFunction
 
@@ -29,37 +33,40 @@ const defaultProps = (
     },
     location: history.location,
     history,
-    extensionsController: {
-        services: {} as Services,
-    } as any,
+    extensionsController,
     telemetryService: NOOP_TELEMETRY_SERVICE,
     themePreference: ThemePreference.Light,
     onThemePreferenceChange: () => undefined,
-    setVersionContext: () => undefined,
+    setVersionContext: () => Promise.resolve(undefined),
     availableVersionContexts: [],
     globbing: false,
     enableSmartQuery: false,
+    parsedSearchQuery: 'r:golang/oauth2 test f:travis',
     patternType: SearchPatternType.literal,
     setPatternType: () => undefined,
     caseSensitive: false,
     setCaseSensitivity: () => undefined,
     platformContext: {} as any,
     keyboardShortcuts: [],
-    filtersInQuery: {} as any,
-    onFiltersInQueryChange: () => undefined,
-    splitSearchModes: false,
-    interactiveSearchMode: false,
-    toggleSearchMode: () => undefined,
     copyQueryButton: false,
     versionContext: undefined,
+    showSearchContext: false,
+    showSearchContextManagement: false,
+    selectedSearchContextSpec: '',
+    setSelectedSearchContextSpec: () => undefined,
+    defaultSearchContextSpec: '',
     showOnboardingTour: false,
     isLightTheme: props.isLightTheme,
-    navbarSearchQueryState: { cursorPosition: 0, query: '' },
+    navbarSearchQueryState: { query: '' },
     onNavbarQueryChange: () => {},
     isExtensionAlertAnimating: false,
-    showCampaigns: true,
+    showBatchChanges: true,
+    enableCodeMonitoring: true,
     activation: undefined,
     hideNavLinks: false,
+    routes: [],
+    fetchAutoDefinedSearchContexts: mockFetchAutoDefinedSearchContexts(),
+    fetchSearchContexts: mockFetchSearchContexts,
 })
 
 const { add } = storiesOf('web/nav/GlobalNav', module)

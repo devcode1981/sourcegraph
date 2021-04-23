@@ -12,7 +12,6 @@ import (
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/inventory"
 	"github.com/sourcegraph/sourcegraph/internal/api"
 	"github.com/sourcegraph/sourcegraph/internal/goroutine"
-	"github.com/sourcegraph/sourcegraph/internal/types"
 )
 
 func (srs *searchResultsStats) Languages(ctx context.Context) ([]*languageStatisticsResolver, error) {
@@ -21,7 +20,7 @@ func (srs *searchResultsStats) Languages(ctx context.Context) ([]*languageStatis
 		return nil, err
 	}
 
-	langs, err := searchResultsStatsLanguages(ctx, srr.Results())
+	langs, err := searchResultsStatsLanguages(ctx, srr.SearchResults)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +46,7 @@ func searchResultsStatsLanguages(ctx context.Context, results []SearchResultReso
 	}
 
 	var (
-		repos    = map[api.RepoID]*types.Repo{}
+		repos    = map[api.RepoID]*RepositoryResolver{}
 		filesMap = map[repoCommit]*fileStatsWork{}
 
 		run = parallel.NewRun(16)
@@ -57,9 +56,9 @@ func searchResultsStatsLanguages(ctx context.Context, results []SearchResultReso
 	)
 
 	// Track the mapping of repo ID -> repo object as we iterate.
-	sawRepo := func(repo *types.Repo) {
-		if _, ok := repos[repo.ID]; !ok {
-			repos[repo.ID] = repo
+	sawRepo := func(repo *RepositoryResolver) {
+		if _, ok := repos[repo.IDInt32()]; !ok {
+			repos[repo.IDInt32()] = repo
 		}
 	}
 
@@ -75,7 +74,7 @@ func searchResultsStatsLanguages(ctx context.Context, results []SearchResultReso
 
 	for _, res := range results {
 		if fileMatch, ok := res.ToFileMatch(); ok {
-			sawRepo(fileMatch.Repository().innerRepo)
+			sawRepo(fileMatch.Repository())
 			key := repoCommit{repo: fileMatch.Repository().IDInt32(), commitID: fileMatch.CommitID}
 
 			if _, ok := filesMap[key]; !ok {
@@ -96,7 +95,7 @@ func searchResultsStatsLanguages(ctx context.Context, results []SearchResultReso
 				})
 			}
 		} else if repo, ok := res.ToRepository(); ok && !hasNonRepoMatches {
-			sawRepo(repo.innerRepo)
+			sawRepo(repo)
 			run.Acquire()
 			goroutine.Go(func() {
 				defer run.Release()
@@ -140,7 +139,7 @@ func searchResultsStatsLanguages(ctx context.Context, results []SearchResultReso
 		goroutine.Go(func() {
 			defer run.Release()
 
-			invCtx, err := backend.InventoryContext(repos[key.repo].Name, key.commitID, true)
+			invCtx, err := backend.InventoryContext(repos[key.repo].RepoName(), key.commitID, true)
 			if err != nil {
 				run.Error(err)
 				return

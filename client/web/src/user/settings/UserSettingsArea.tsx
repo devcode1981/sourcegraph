@@ -1,18 +1,22 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import MapSearchIcon from 'mdi-react/MapSearchIcon'
 import React from 'react'
 import { Route, RouteComponentProps, Switch } from 'react-router'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+
+import { AuthenticatedUser } from '../../auth'
 import { withAuthenticatedUser } from '../../auth/withAuthenticatedUser'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { HeroPage } from '../../components/HeroPage'
-import { ThemeProps } from '../../../../shared/src/theme'
+import { CreateAccessTokenResult, UserAreaUserFields } from '../../graphql-operations'
+import { OnboardingTourProps } from '../../search'
+import { UserRepositoriesUpdateProps } from '../../util'
 import { RouteDescriptor } from '../../util/contributions'
 import { UserAreaRouteContext } from '../area/UserArea'
+
 import { UserSettingsSidebar, UserSettingsSidebarItems } from './UserSettingsSidebar'
-import { TelemetryProps } from '../../../../shared/src/telemetry/telemetryService'
-import { OnboardingTourProps } from '../../search'
-import { AuthenticatedUser } from '../../auth'
-import { CreateAccessTokenResult, UserAreaUserFields } from '../../graphql-operations'
 
 const NotFoundPage: React.FunctionComponent = () => <HeroPage icon={MapSearchIcon} title="404: Not Found" />
 
@@ -23,7 +27,8 @@ export interface UserSettingsAreaProps
         RouteComponentProps<{}>,
         ThemeProps,
         TelemetryProps,
-        OnboardingTourProps {
+        OnboardingTourProps,
+        UserRepositoriesUpdateProps {
     authenticatedUser: AuthenticatedUser
     sideBarItems: UserSettingsSidebarItems
     routes: readonly UserSettingsAreaRoute[]
@@ -74,7 +79,11 @@ export const UserSettingsArea = withAuthenticatedUser(
 
             return (
                 <div className="d-flex">
-                    <UserSettingsSidebar items={this.props.sideBarItems} {...this.props} className="flex-0 mr-3" />
+                    <UserSettingsSidebar
+                        items={this.props.sideBarItems}
+                        {...this.props}
+                        className="flex-0 mr-3 user-settings-sidebar"
+                    />
                     <div className="flex-1">
                         <ErrorBoundary location={this.props.location}>
                             <React.Suspense fallback={<LoadingSpinner className="icon-inline m-2" />}>

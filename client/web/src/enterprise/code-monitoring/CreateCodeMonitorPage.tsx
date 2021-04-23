@@ -1,34 +1,36 @@
 import * as H from 'history'
-import React, { useCallback, useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo } from 'react'
 import { Observable } from 'rxjs'
-import { CodeMonitoringProps } from '.'
+
 import { AuthenticatedUser } from '../../auth'
-import { BreadcrumbSetters, BreadcrumbsProps } from '../../components/Breadcrumbs'
 import { PageTitle } from '../../components/PageTitle'
 import { CodeMonitorFields, MonitorEmailPriority } from '../../graphql-operations'
+import { eventLogger } from '../../tracking/eventLogger'
+
+import { createCodeMonitor as _createCodeMonitor } from './backend'
 import { CodeMonitorForm } from './components/CodeMonitorForm'
 
-export interface CreateCodeMonitorPageProps
-    extends BreadcrumbsProps,
-        BreadcrumbSetters,
-        Pick<CodeMonitoringProps, 'createCodeMonitor'> {
+export interface CreateCodeMonitorPageProps {
     location: H.Location
     history: H.History
     authenticatedUser: AuthenticatedUser
+
+    createCodeMonitor?: typeof _createCodeMonitor
 }
 
-export const CreateCodeMonitorPage: React.FunctionComponent<CreateCodeMonitorPageProps> = props => {
-    props.useBreadcrumb(
-        useMemo(
-            () => ({
-                key: 'Create Code Monitor',
-                element: <>Create new code monitor</>,
-            }),
-            []
-        )
-    )
+export const CreateCodeMonitorPage: React.FunctionComponent<CreateCodeMonitorPageProps> = ({
+    authenticatedUser,
+    history,
+    location,
+    createCodeMonitor = _createCodeMonitor,
+}) => {
+    const triggerQuery = useMemo(() => new URLSearchParams(location.search).get('trigger-query') ?? undefined, [
+        location.search,
+    ])
+    useEffect(() => eventLogger.logViewEvent('CreateCodeMonitorPage', { hasTriggerQuery: !!triggerQuery }), [
+        triggerQuery,
+    ])
 
-    const { authenticatedUser, createCodeMonitor } = props
     const createMonitorRequest = useCallback(
         (codeMonitor: CodeMonitorFields): Observable<Partial<CodeMonitorFields>> =>
             createCodeMonitor({
@@ -52,7 +54,7 @@ export const CreateCodeMonitorPage: React.FunctionComponent<CreateCodeMonitorPag
     )
 
     return (
-        <div className="container col-8 mt-5">
+        <div className="container col-8">
             <PageTitle title="Create new code monitor" />
             <div className="page-header d-flex flex-wrap align-items-center">
                 <h2 className="flex-grow-1">Create code monitor</h2>
@@ -65,7 +67,14 @@ export const CreateCodeMonitorPage: React.FunctionComponent<CreateCodeMonitorPag
             >
                 Learn more
             </a>
-            <CodeMonitorForm {...props} onSubmit={createMonitorRequest} submitButtonLabel="Create code monitor" />
+            <CodeMonitorForm
+                history={history}
+                location={location}
+                authenticatedUser={authenticatedUser}
+                onSubmit={createMonitorRequest}
+                triggerQuery={triggerQuery}
+                submitButtonLabel="Create code monitor"
+            />
         </div>
     )
 }

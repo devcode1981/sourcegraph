@@ -8,32 +8,33 @@ import (
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/external/app"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/globals"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend"
-	_ "github.com/sourcegraph/sourcegraph/enterprise/cmd/frontend/auth"
+	_ "github.com/sourcegraph/sourcegraph/enterprise/cmd/frontend/internal/auth"
 	"github.com/sourcegraph/sourcegraph/enterprise/cmd/frontend/internal/dotcom/productsubscription"
-	_ "github.com/sourcegraph/sourcegraph/enterprise/cmd/frontend/internal/graphqlbackend"
 	"github.com/sourcegraph/sourcegraph/enterprise/cmd/frontend/internal/licensing/enforcement"
 	_ "github.com/sourcegraph/sourcegraph/enterprise/cmd/frontend/internal/registry"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/licensing"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/licensing/resolvers"
 	"github.com/sourcegraph/sourcegraph/internal/conf"
-	"github.com/sourcegraph/sourcegraph/internal/db"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	"github.com/sourcegraph/sourcegraph/internal/goroutine"
+	"github.com/sourcegraph/sourcegraph/internal/oobmigration"
 )
 
 // TODO(efritz) - de-globalize assignments in this function
 // TODO(efritz) - refactor licensing packages - this is a huge mess!
-func Init(ctx context.Context, enterpriseServices *enterprise.Services) error {
+func Init(ctx context.Context, db dbutil.DB, outOfBandMigrationRunner *oobmigration.Runner, enterpriseServices *enterprise.Services) error {
 	// Enforce the license's max user count by preventing the creation of new users when the max is
 	// reached.
-	db.Users.BeforeCreateUser = enforcement.NewBeforeCreateUserHook(&usersStore{})
+	database.BeforeCreateUser = enforcement.NewBeforeCreateUserHook()
 
 	// Enforce non-site admin roles in Free tier.
-	db.Users.AfterCreateUser = enforcement.NewAfterCreateUserHook()
-	db.Users.BeforeSetUserIsSiteAdmin = enforcement.NewBeforeSetUserIsSiteAdmin()
+	database.AfterCreateUser = enforcement.NewAfterCreateUserHook()
+	database.BeforeSetUserIsSiteAdmin = enforcement.NewBeforeSetUserIsSiteAdmin()
 
 	// Enforce the license's max external service count by preventing the creation of new external
 	// services when the max is reached.
-	db.ExternalServices.PreCreateExternalService = enforcement.NewPreCreateExternalServiceHook(&externalServicesStore{})
+	database.BeforeCreateExternalService = enforcement.NewBeforeCreateExternalServiceHook()
 
 	// Enforce the license's feature check for monitoring. If the license does not support the monitoring
 	// feature, then alternative debug handlers will be invoked.
@@ -102,23 +103,23 @@ func Init(ctx context.Context, enterpriseServices *enterprise.Services) error {
 	enterpriseServices.LicenseResolver = resolvers.LicenseResolver{}
 
 	goroutine.Go(func() {
-		licensing.StartMaxUserCount(&usersStore{})
+		licensing.StartMaxUserCount(&usersStore{
+			db: db,
+		})
 	})
 	if envvar.SourcegraphDotComMode() {
-		goroutine.Go(productsubscription.StartCheckForUpcomingLicenseExpirations)
+		goroutine.Go(func() {
+			productsubscription.StartCheckForUpcomingLicenseExpirations(db)
+		})
 	}
 
 	return nil
 }
 
-type usersStore struct{}
-
-func (usersStore) Count(ctx context.Context) (int, error) {
-	return db.Users.Count(ctx, nil)
+type usersStore struct {
+	db dbutil.DB
 }
 
-type externalServicesStore struct{}
-
-func (externalServicesStore) Count(ctx context.Context, opts db.ExternalServicesListOptions) (int, error) {
-	return db.ExternalServices.Count(ctx, opts)
+func (u *usersStore) Count(ctx context.Context) (int, error) {
+	return database.Users(u.db).Count(ctx, nil)
 }

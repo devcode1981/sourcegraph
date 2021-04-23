@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws/awserr"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"github.com/inconshreveable/log15"
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
@@ -17,14 +17,14 @@ import (
 	eiauthz "github.com/sourcegraph/sourcegraph/enterprise/internal/authz"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/gitserver"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/stores/dbstore"
-	store "github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/stores/dbstore"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/stores/lsifstore"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/stores/uploadstore"
 	"github.com/sourcegraph/sourcegraph/internal/authz"
 	"github.com/sourcegraph/sourcegraph/internal/conf"
-	"github.com/sourcegraph/sourcegraph/internal/db"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbconn"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbconn"
 	"github.com/sourcegraph/sourcegraph/internal/debugserver"
+	"github.com/sourcegraph/sourcegraph/internal/encryption/keyring"
 	"github.com/sourcegraph/sourcegraph/internal/env"
 	"github.com/sourcegraph/sourcegraph/internal/goroutine"
 	"github.com/sourcegraph/sourcegraph/internal/httpserver"
@@ -60,14 +60,24 @@ func main() {
 	}
 
 	// Start debug server
-	go debugserver.NewServerRoutine().Start()
+	ready := make(chan struct{})
+	go debugserver.NewServerRoutine(ready).Start()
+
+	if err := keyring.Init(context.Background()); err != nil {
+		log.Fatalf("Failed to intialise keyring: %v", err)
+	}
 
 	// Connect to databases
 	db := mustInitializeDB()
 	codeIntelDB := mustInitializeCodeIntelDB()
 
+	// Migrations may take a while, but after they're done we'll immediately
+	// spin up a server and can accept traffic. Inform external clients we'll
+	// be ready for traffic.
+	close(ready)
+
 	// Initialize stores
-	dbStore := store.NewWithDB(db, observationContext)
+	dbStore := dbstore.NewWithDB(db, observationContext)
 	workerStore := dbstore.WorkerutilUploadStore(dbStore, observationContext)
 	lsifStore := lsifstore.NewStore(codeIntelDB, observationContext)
 	gitserverClient := gitserver.New(dbStore, observationContext)
@@ -85,9 +95,9 @@ func main() {
 
 	// Initialize worker
 	worker := worker.NewWorker(
-		&worker.DBStoreShim{dbStore},
+		&worker.DBStoreShim{Store: dbStore},
 		workerStore,
-		&worker.LSIFStoreShim{lsifStore},
+		&worker.LSIFStoreShim{Store: lsifStore},
 		uploadStore,
 		gitserverClient,
 		config.WorkerPollInterval,
@@ -125,7 +135,7 @@ func mustInitializeDB() *sql.DB {
 	ctx := context.Background()
 	go func() {
 		for range time.NewTicker(5 * time.Second).C {
-			allowAccessByDefault, authzProviders, _, _ := eiauthz.ProvidersFromConfig(ctx, conf.Get(), db.ExternalServices)
+			allowAccessByDefault, authzProviders, _, _ := eiauthz.ProvidersFromConfig(ctx, conf.Get(), database.GlobalExternalServices)
 			authz.SetProviders(allowAccessByDefault, authzProviders)
 		}
 	}()
@@ -149,7 +159,7 @@ func mustInitializeCodeIntelDB() *sql.DB {
 		log.Fatalf("Failed to connect to codeintel database: %s", err)
 	}
 
-	if err := dbconn.MigrateDB(db, "codeintel"); err != nil {
+	if err := dbconn.MigrateDB(db, dbconn.CodeIntel); err != nil {
 		log.Fatalf("Failed to perform codeintel database migration: %s", err)
 	}
 
@@ -189,15 +199,6 @@ func initializeUploadStore(ctx context.Context, uploadStore uploadstore.Store) e
 }
 
 func isRequestError(err error) bool {
-	for err != nil {
-		if e, ok := err.(awserr.Error); ok {
-			if e.Code() == "RequestError" {
-				return true
-			}
-		}
-
-		err = errors.Unwrap(err)
-	}
-
-	return false
+	var rse *smithyhttp.RequestSendError
+	return errors.As(err, &rse)
 }

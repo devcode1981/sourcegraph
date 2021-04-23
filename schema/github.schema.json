@@ -42,7 +42,7 @@
           "default": true
         },
         "requestsPerHour": {
-          "description": "Requests per hour permitted. This is an average, calculated per second.",
+          "description": "Requests per hour permitted. This is an average, calculated per second. Internally, the burst limit is set to 100, which implies that for a requests per hour limit as low as 1, users will continue to be able to send a maximum of 100 requests immediately, provided that the complexity cost of each request is 1.",
           "type": "number",
           "default": 5000,
           "minimum": 0
@@ -168,6 +168,13 @@
     "cloudGlobal": {
       "title": "CloudGlobal",
       "description": "When set to true, this external service will be chosen as our 'Global' GitHub service. Only valid on Sourcegraph.com. Only one service can have this flag set.",
+      "type": "boolean",
+      "default": false,
+      "deprecationMessage": "DEPRECATED: The cloud_default flag should be set in the database instead"
+    },
+    "cloudDefault": {
+      "title": "CloudDefault",
+      "description": "Only used to override the cloud_default column from a config file specified by EXTSVC_CONFIG_FILE",
       "type": "boolean",
       "default": false
     }

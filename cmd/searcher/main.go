@@ -41,7 +41,10 @@ func main() {
 	tracer.Init()
 	trace.Init(true)
 
-	go debugserver.Start()
+	// Ready immediately
+	ready := make(chan struct{})
+	close(ready)
+	go debugserver.NewServerRoutine(ready).Start()
 
 	var cacheSizeBytes int64
 	if i, err := strconv.ParseInt(cacheSizeMB, 10, 64); err != nil {
@@ -55,9 +58,7 @@ func main() {
 			FetchTar: func(ctx context.Context, repo api.RepoName, commit api.CommitID) (io.ReadCloser, error) {
 				return gitserver.DefaultClient.Archive(ctx, repo, gitserver.ArchiveOptions{Treeish: string(commit), Format: "tar"})
 			},
-			FilterTar: func(ctx context.Context, repo api.RepoName, commit api.CommitID) (store.FilterFunc, error) {
-				return search.NewFilter(ctx, repo, commit)
-			},
+			FilterTar:         search.NewFilter,
 			Path:              filepath.Join(cacheDir, "searcher-archives"),
 			MaxCacheSizeBytes: cacheSizeBytes,
 		},

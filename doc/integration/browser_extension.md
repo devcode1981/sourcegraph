@@ -11,6 +11,12 @@ Enterprise, GitLab, Phabricator, and Bitbucket Server.
 </p>
 
 <p>
+  <a target="_blank" href="https://apps.apple.com/us/app/sourcegraph-for-safari/id1543262193" style="display:flex;align-items:center">
+  <img src="img/safari.svg" width="24" height="24" style="margin-right:5px" /> <strong>Install Sourcegraph for Safari</strong>
+  </a>
+</p>
+
+<p>
   <a target="_blank" href="https://storage.googleapis.com/sourcegraph-for-firefox/latest.xpi" style="display:flex;align-items:center">
   <img src="img/firefox.svg" width="24" height="24" style="margin-right:5px" /> <strong>Install Sourcegraph for Firefox</strong>
   </a>
@@ -54,7 +60,7 @@ When you hover your mouse over code in files, diffs, pull requests, etc., the So
 
 The Sourcegraph extension adds a search engine shortcut to your web browser that performs a search on your Sourcegraph instance. After you've installed it (see above), use the search shortcut it provides to perform a search:
 
-1. Place cursor in the URL location bar, then type <kbd>src</kbd> <kbd>Space</kbd>.
+1. Place cursor in the URL location bar, then type <kbd>src</kbd> <kbd>Tab</kbd>.
 1. Start typing your search query.
 1. Select an instant search suggestion or press <kbd>Enter</kbd> to see all results.
 
@@ -130,11 +136,23 @@ In rare cases, Chrome can get into the state where the option to **Enable Source
 
 If that still doesn't work, viewing the console and network activity of the extension is the next step.
 
-### Viewing browser extension console and network activity in Chrome
+### Viewing browser extension console and network activity in Chrome and Safari
 
-If still experiencing issues, the next step is to inspect the browser extension console output and network activity, often revealing subtle configuration errors.
+If you are still experiencing issues, the next step is to inspect the browser extension console output and network activity, often revealing subtle configuration errors.
 
+In Chrome:
 ![Chrome extension console and network activity](https://sourcegraphstatic.com/ChromeExtensionConsoleNetworkActivity.gif)
+
+1) Right click the Sourcegraph browser extension icon
+2) Select Manage Extensions
+3) Under Inspect Views select background page, this will open a dev console to the extension background page
+4) In the developer console select the network tab
+
+In Safari:
+
+1) Ensure you have access to the develop tab by selecting Safari > Preferences > Advanced, at the bottom of the preference UI check the box labelled `Show Develop menu in menu bar`
+2 ) In Develop select Web Extension Background Pages > Sourcegraph
+3) Select the Network tab
 
 If that still doesn't help, take a screenshot of the console and network activity and attach it [to a new issue](https://github.com/sourcegraph/sourcegraph/issues/new?assignees=&labels=&template=bug_report.md&title=Browser%20extension%20-%20) so we can investigate further.
 
@@ -143,6 +161,12 @@ If that still doesn't help, take a screenshot of the console and network activit
 Since `v3.14.0+`, the Sourcegraph browser extension can only authenticate with Sourcegraph instances that have [HTTPS](../admin/tls_ssl.md) configured.
 
 Previously, the Sourcegraph browser extension was able to authenticate with instances that hadn't enabled tls / ssl. However, modern web browsers have started to adopt and implement [an IETF proposal](https://web.dev/samesite-cookies-explained/) that removes the deprecated logic that allowed this behavior. Please configure [HTTPS](../admin/tls_ssl.md) in order to continue using the browser extension with your private instance.
+
+### `The string did not match the expected pattern` error in Safari
+
+The above validation error occurs in Safari when the browser tries to parse a non-JSON text as JSON. Communication between the graphql server & browser extension is always assumed to be JSON. However, when a proxy/saml is used with Sourcegraph, sometimes the proxy can send text/html instead.
+
+If you see this error displayed beneath the Url field of the sourcegraph extension, make sure that your current browser session is not in private mode. 
 
 ## Privacy
 

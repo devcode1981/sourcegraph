@@ -1,8 +1,10 @@
-import React from 'react'
 import CloseIcon from 'mdi-react/CloseIcon'
 import ExportIcon from 'mdi-react/ExportIcon'
-import { serviceTypeDisplayNameAndIcon } from './GoToCodeHostAction'
-import { ExternalLinkFields } from '../../graphql-operations'
+import React from 'react'
+
+import { ExternalLinkFields, ExternalServiceKind } from '../../graphql-operations'
+
+import { serviceKindDisplayNameAndIcon } from './GoToCodeHostAction'
 
 interface Props {
     onAlertDismissed: () => void
@@ -15,7 +17,12 @@ interface Props {
 const CHROME_EXTENSION_STORE_LINK = 'https://chrome.google.com/webstore/detail/dgjhfomjieaadpoljlnidmbgkdffpack'
 
 /** Code hosts the browser extension supports */
-const supportedServiceTypes = new Set<string>(['github', 'gitlab', 'phabricator', 'bitbucketServer'])
+const supportedServiceTypes = new Set<string>([
+    ExternalServiceKind.GITHUB,
+    ExternalServiceKind.GITLAB,
+    ExternalServiceKind.PHABRICATOR,
+    ExternalServiceKind.BITBUCKETSERVER,
+])
 
 export const InstallBrowserExtensionAlert: React.FunctionComponent<Props> = ({
     onAlertDismissed,
@@ -23,13 +30,13 @@ export const InstallBrowserExtensionAlert: React.FunctionComponent<Props> = ({
     isChrome,
     codeHostIntegrationMessaging,
 }) => {
-    const externalLink = externalURLs.find(link => link.serviceType && supportedServiceTypes.has(link.serviceType))
+    const externalLink = externalURLs.find(link => link.serviceKind && supportedServiceTypes.has(link.serviceKind))
     if (!externalLink) {
         return null
     }
 
-    const { serviceType } = externalLink
-    const { displayName, icon } = serviceTypeDisplayNameAndIcon(serviceType)
+    const { serviceKind } = externalLink
+    const { displayName, icon } = serviceKindDisplayNameAndIcon(serviceKind)
 
     const Icon = icon || ExportIcon
 
@@ -69,10 +76,13 @@ export const InstallBrowserExtensionAlert: React.FunctionComponent<Props> = ({
                                 Install the Sourcegraph browser extension
                             </a>{' '}
                             to add code intelligence{' '}
-                            {serviceType === 'github' ||
-                            serviceType === 'bitbucketServer' ||
-                            serviceType === 'gitlab' ? (
-                                <>to {serviceType === 'gitlab' ? 'merge requests' : 'pull requests'} and file views</>
+                            {serviceKind === ExternalServiceKind.GITHUB ||
+                            serviceKind === ExternalServiceKind.BITBUCKETSERVER ||
+                            serviceKind === ExternalServiceKind.GITLAB ? (
+                                <>
+                                    to {serviceKind === ExternalServiceKind.GITLAB ? 'merge requests' : 'pull requests'}{' '}
+                                    and file views
+                                </>
                             ) : (
                                 <>while browsing and reviewing code</>
                             )}{' '}
@@ -81,12 +91,12 @@ export const InstallBrowserExtensionAlert: React.FunctionComponent<Props> = ({
                     ) : (
                         <>
                             Get code intelligence{' '}
-                            {serviceType === 'github' ||
-                            serviceType === 'bitbucketServer' ||
-                            serviceType === 'gitlab' ? (
+                            {serviceKind === ExternalServiceKind.GITHUB ||
+                            serviceKind === ExternalServiceKind.BITBUCKETSERVER ||
+                            serviceKind === ExternalServiceKind.GITLAB ? (
                                 <>
                                     while browsing files and reviewing{' '}
-                                    {serviceType === 'gitlab' ? 'merge requests' : 'pull requests'}
+                                    {serviceKind === ExternalServiceKind.GITLAB ? 'merge requests' : 'pull requests'}
                                 </>
                             ) : (
                                 <>while browsing and reviewing code</>

@@ -19,13 +19,15 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/ext"
 
+	"github.com/sourcegraph/sourcegraph/cmd/frontend/auth"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/envvar"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/globals"
 	uirouter "github.com/sourcegraph/sourcegraph/cmd/frontend/internal/app/ui/router"
+	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/routevar"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/search"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	"github.com/sourcegraph/sourcegraph/internal/env"
 	"github.com/sourcegraph/sourcegraph/internal/randstring"
-	"github.com/sourcegraph/sourcegraph/internal/routevar"
 	"github.com/sourcegraph/sourcegraph/internal/trace"
 )
 
@@ -42,8 +44,9 @@ const (
 	routeRepoCompare    = "repo-compare"
 	routeRepoStats      = "repo-stats"
 	routeInsights       = "insights"
-	routeCampaigns      = "campaigns"
+	routeBatchChanges   = "batch-changes"
 	routeCodeMonitoring = "code-monitoring"
+	routeContexts       = "contexts"
 	routeThreads        = "threads"
 	routeTree           = "tree"
 	routeBlob           = "blob"
@@ -69,6 +72,7 @@ const (
 	routeSubscriptions  = "subscriptions"
 	routeStats          = "stats"
 	routeViews          = "views"
+	routeDevToolTime    = "devtooltime"
 
 	routeSearchQueryBuilder = "search.query-builder"
 	routeSearchStream       = "search.stream"
@@ -81,12 +85,18 @@ const (
 	routeLegacyOldRouteDefLanding      = "page.def.landing.old"
 	routeLegacyRepoLanding             = "page.repo.landing"
 	routeLegacyDefRedirectToDefLanding = "page.def.redirect"
+	routeLegacyCampaigns               = "campaigns"
 )
 
 // aboutRedirects contains map entries, each of which indicates that
 // sourcegraph.com/$KEY should redirect to about.sourcegraph.com/$VALUE.
 var aboutRedirects = map[string]string{
 	"about":      "about",
+	"blog":       "blog",
+	"customers":  "customers",
+	"docs":       "docs",
+	"handbook":   "handbook",
+	"news":       "news",
 	"plan":       "plan",
 	"contact":    "contact",
 	"pricing":    "pricing",
@@ -100,6 +110,14 @@ var aboutRedirects = map[string]string{
 // Router returns the router that serves pages for our web app.
 func Router() *mux.Router {
 	return uirouter.Router
+}
+
+// InitRouter create the router that serves pages for our web app
+// and assigns it to uirouter.Router.
+// The router can be accessed by calling Router().
+func InitRouter(db dbutil.DB) {
+	router := newRouter()
+	initRouter(db, router)
 }
 
 var mockServeRepo func(w http.ResponseWriter, r *http.Request)
@@ -119,8 +137,9 @@ func newRouter() *mux.Router {
 	r.Path("/sign-in").Methods("GET").Name(uirouter.RouteSignIn)
 	r.Path("/sign-up").Methods("GET").Name(uirouter.RouteSignUp)
 	r.PathPrefix("/insights").Methods("GET").Name(routeInsights)
-	r.PathPrefix("/campaigns").Methods("GET").Name(routeCampaigns)
+	r.PathPrefix("/batch-changes").Methods("GET").Name(routeBatchChanges)
 	r.PathPrefix("/code-monitoring").Methods("GET").Name(routeCodeMonitoring)
+	r.PathPrefix("/contexts").Methods("GET").Name(routeContexts)
 	r.PathPrefix("/organizations").Methods("GET").Name(routeOrganizations)
 	r.PathPrefix("/settings").Methods("GET").Name(routeSettings)
 	r.PathPrefix("/site-admin").Methods("GET").Name(routeSiteAdmin)
@@ -139,6 +158,8 @@ func newRouter() *mux.Router {
 	r.PathPrefix("/subscriptions").Methods("GET").Name(routeSubscriptions)
 	r.PathPrefix("/stats").Methods("GET").Name(routeStats)
 	r.PathPrefix("/views").Methods("GET").Name(routeViews)
+	r.PathPrefix("/devtooltime").Methods("GET").Name(routeDevToolTime)
+	r.Path("/ping-from-self-hosted").Methods("GET", "OPTIONS").Name(uirouter.RoutePingFromSelfHosted)
 
 	// Repogroup pages. Must mirror web/src/Layout.tsx
 	if envvar.SourcegraphDotComMode() {
@@ -150,6 +171,7 @@ func newRouter() *mux.Router {
 	// Legacy redirects
 	r.Path("/login").Methods("GET").Name(routeLegacyLogin)
 	r.Path("/careers").Methods("GET").Name(routeLegacyCareers)
+	r.Path("/campaigns{Path:(?:$|/.*)}").Methods("GET").Name(routeLegacyCampaigns)
 
 	// repo
 	repoRevPath := "/" + routevar.Repo + routevar.RepoRevSuffix
@@ -183,10 +205,6 @@ func newRouter() *mux.Router {
 	return r
 }
 
-func init() {
-	initRouter()
-}
-
 // brandNameSubtitle returns a string with the specified title sequence and the brand name as the
 // last title component. This function indirectly calls conf.Get(), so should not be invoked from
 // any function that is invoked by an init function.
@@ -194,15 +212,25 @@ func brandNameSubtitle(titles ...string) string {
 	return strings.Join(append(titles, globals.Branding().BrandName), " - ")
 }
 
-func initRouter() {
-	// basic pages with static titles
-	router := newRouter()
+func initRouter(db dbutil.DB, router *mux.Router) {
 	uirouter.Router = router // make accessible to other packages
+
+	// basic pages with static titles
 	router.Get(routeHome).Handler(handler(serveHome))
 	router.Get(routeThreads).Handler(handler(serveBrandedPageString("Threads", nil)))
 	router.Get(routeInsights).Handler(handler(serveBrandedPageString("Insights", nil)))
-	router.Get(routeCampaigns).Handler(handler(serveBrandedPageString("Campaigns", nil)))
+	router.Get(routeLegacyCampaigns).Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.URL.Path = "/batch-changes" + mux.Vars(r)["Path"]
+		// Temporary redirect so at some point we can reuse the /campaigns path, if needed.
+		http.Redirect(w, r, auth.SafeRedirectURL(r.URL.String()), http.StatusTemporaryRedirect)
+	}))
+	if envvar.SourcegraphDotComMode() {
+		router.Get(routeBatchChanges).Handler(staticRedirectHandler("https://about.sourcegraph.com/batch-changes", http.StatusTemporaryRedirect))
+	} else {
+		router.Get(routeBatchChanges).Handler(handler(serveBrandedPageString("Batch Changes", nil)))
+	}
 	router.Get(routeCodeMonitoring).Handler(handler(serveBrandedPageString("Code Monitoring", nil)))
+	router.Get(routeContexts).Handler(handler(serveBrandedPageString("Search Contexts", nil)))
 	router.Get(uirouter.RouteSignIn).Handler(handler(serveSignIn))
 	router.Get(uirouter.RouteSignUp).Handler(handler(serveBrandedPageString("Sign up", nil)))
 	router.Get(routeOrganizations).Handler(handler(serveBrandedPageString("Organization", nil)))
@@ -226,6 +254,7 @@ func initRouter() {
 	router.Get(routeSubscriptions).Handler(handler(serveBrandedPageString("Subscriptions", nil)))
 	router.Get(routeStats).Handler(handler(serveBrandedPageString("Stats", nil)))
 	router.Get(routeViews).Handler(handler(serveBrandedPageString("View", nil)))
+	router.Get(uirouter.RoutePingFromSelfHosted).Handler(handler(servePingFromSelfHosted))
 
 	router.Get(routeUserSettings).Handler(handler(serveBrandedPageString("User settings", nil)))
 	router.Get(routeUserRedirect).Handler(handler(serveBrandedPageString("User", nil)))
@@ -256,10 +285,10 @@ func initRouter() {
 	}, nil)))
 
 	// streaming search
-	router.Get(routeSearchStream).Handler(search.StreamHandler)
+	router.Get(routeSearchStream).Handler(search.StreamHandler(db))
 
 	// search badge
-	router.Get(routeSearchBadge).Handler(searchBadgeHandler)
+	router.Get(routeSearchBadge).Handler(searchBadgeHandler())
 
 	if envvar.SourcegraphDotComMode() {
 		// about subdomain
@@ -273,6 +302,7 @@ func initRouter() {
 		router.Get(routeRepoGroups).Handler(handler(serveBrandedPageString("Repogroup", nil)))
 		cncfDescription := "Search all repositories in the Cloud Native Computing Foundation (CNCF)."
 		router.Get(routeCncf).Handler(handler(serveBrandedPageString("CNCF code search", &cncfDescription)))
+		router.Get(routeDevToolTime).Handler(staticRedirectHandler("https://info.sourcegraph.com/dev-tool-time", http.StatusMovedPermanently))
 	}
 
 	// repo
@@ -379,7 +409,7 @@ func handler(f func(w http.ResponseWriter, r *http.Request) error) http.Handler 
 			serveError(w, r, err, http.StatusInternalServerError)
 		}
 	})
-	return trace.TraceRoute(gziphandler.GzipHandler(h))
+	return trace.Route(gziphandler.GzipHandler(h))
 }
 
 type recoverError struct {
@@ -459,11 +489,12 @@ func serveErrorNoDebug(w http.ResponseWriter, r *http.Request, err error, status
 		// Stub out serveError to newCommon so that it is not reentrant.
 		commonServeErr = err
 	})
-	common.Error = pageErrorContext
 	if commonErr == nil && commonServeErr == nil {
 		if common == nil {
 			return // request handled by newCommon
 		}
+
+		common.Error = pageErrorContext
 		fancyErr := renderTemplate(w, "app.html", &struct {
 			*Common
 		}{

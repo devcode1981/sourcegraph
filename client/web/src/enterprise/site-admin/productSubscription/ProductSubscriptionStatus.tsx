@@ -3,21 +3,25 @@ import React, { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { Observable } from 'rxjs'
 import { catchError, map } from 'rxjs/operators'
-import { gql, dataOrThrowErrors } from '../../../../../shared/src/graphql/graphql'
-import * as GQL from '../../../../../shared/src/graphql/schema'
-import { asError, ErrorLike, isErrorLike } from '../../../../../shared/src/util/errors'
-import { numberWithCommas } from '../../../../../shared/src/util/strings'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { gql, dataOrThrowErrors } from '@sourcegraph/shared/src/graphql/graphql'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { asError, ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { numberWithCommas } from '@sourcegraph/shared/src/util/strings'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
+
 import { queryGraphQL } from '../../../backend/graphql'
+import { ErrorAlert } from '../../../components/alerts'
+import { formatUserCount } from '../../../productSubscription/helpers'
 import { ExpirationDate } from '../../productSubscription/ExpirationDate'
-import { formatUserCount } from '../../productSubscription/helpers'
 import { ProductCertificate } from '../../productSubscription/ProductCertificate'
 import { TrueUpStatusSummary } from '../../productSubscription/TrueUpStatusSummary'
-import { ErrorAlert } from '../../../components/alerts'
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
-import { useObservable } from '../../../../../shared/src/util/useObservable'
-import * as H from 'history'
 
-const queryProductLicenseInfo = (): Observable<GQL.IProductSubscriptionStatus> =>
+const queryProductLicenseInfo = (): Observable<{
+    productSubscription: GQL.IProductSubscriptionStatus
+    currentUserCount: number
+}> =>
     queryGraphQL(gql`
         query ProductLicenseInfo {
             site {
@@ -33,10 +37,16 @@ const queryProductLicenseInfo = (): Observable<GQL.IProductSubscriptionStatus> =
                     }
                 }
             }
+            users {
+                totalCount
+            }
         }
     `).pipe(
         map(dataOrThrowErrors),
-        map(data => data.site.productSubscription)
+        map(({ site, users }) => ({
+            productSubscription: site.productSubscription,
+            currentUserCount: users.totalCount,
+        }))
     )
 
 interface Props {
@@ -49,13 +59,12 @@ interface Props {
      *
      */
     showTrueUpStatus?: boolean
-    history: H.History
 }
 
 /**
  * A component displaying information about and the status of the product subscription.
  */
-export const ProductSubscriptionStatus: React.FunctionComponent<Props> = ({ className, showTrueUpStatus, history }) => {
+export const ProductSubscriptionStatus: React.FunctionComponent<Props> = ({ className, showTrueUpStatus }) => {
     /** The product subscription status, or an error, or undefined while loading. */
     const statusOrError = useObservable(
         useMemo(() => queryProductLicenseInfo().pipe(catchError((error): [ErrorLike] => [asError(error)])), [])
@@ -68,15 +77,18 @@ export const ProductSubscriptionStatus: React.FunctionComponent<Props> = ({ clas
         )
     }
     if (isErrorLike(statusOrError)) {
-        return <ErrorAlert error={statusOrError} prefix="Error checking product license" history={history} />
+        return <ErrorAlert error={statusOrError} prefix="Error checking product license" />
     }
 
     const {
-        productNameWithBrand,
-        actualUserCount,
-        actualUserCountDate,
-        noLicenseWarningUserCount,
-        license,
+        productSubscription: {
+            productNameWithBrand,
+            actualUserCount,
+            actualUserCountDate,
+            noLicenseWarningUserCount,
+            license,
+        },
+        currentUserCount,
     } = statusOrError
 
     // No license means Sourcegraph Free. For that, show the user that they can use this for free
@@ -104,8 +116,9 @@ export const ProductSubscriptionStatus: React.FunctionComponent<Props> = ({ clas
                         {license ? (
                             <>
                                 <div>
-                                    <strong>User licenses:</strong> {numberWithCommas(actualUserCount)} used /{' '}
-                                    {numberWithCommas(license.userCount - actualUserCount)} remaining
+                                    <strong>User licenses:</strong> {numberWithCommas(currentUserCount)} currently used
+                                    / {numberWithCommas(license.userCount - currentUserCount)} remaining (
+                                    {numberWithCommas(actualUserCount)} maximum ever used)
                                 </div>
                                 <a
                                     href="https://about.sourcegraph.com/pricing"

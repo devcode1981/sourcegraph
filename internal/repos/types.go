@@ -5,58 +5,11 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/sourcegraph/sourcegraph/internal/campaigns"
-	"github.com/sourcegraph/sourcegraph/internal/db"
+	"github.com/sourcegraph/sourcegraph/internal/database"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc"
 	"github.com/sourcegraph/sourcegraph/internal/ratelimit"
 	"github.com/sourcegraph/sourcegraph/internal/types"
-	"github.com/sourcegraph/sourcegraph/internal/vcs/git"
 )
-
-// A Changeset of an existing Repo.
-type Changeset struct {
-	Title   string
-	Body    string
-	HeadRef string
-	BaseRef string
-
-	*campaigns.Changeset
-	*types.Repo
-}
-
-// IsOutdated returns true when the attributes of the nested
-// campaigns.Changeset do not match the attributes (title, body, ...) set on
-// the Changeset.
-func (c *Changeset) IsOutdated() (bool, error) {
-	currentTitle, err := c.Changeset.Title()
-	if err != nil {
-		return false, err
-	}
-
-	if currentTitle != c.Title {
-		return true, nil
-	}
-
-	currentBody, err := c.Changeset.Body()
-	if err != nil {
-		return false, err
-	}
-
-	if currentBody != c.Body {
-		return true, nil
-	}
-
-	currentBaseRef, err := c.Changeset.BaseRef()
-	if err != nil {
-		return false, err
-	}
-
-	if git.EnsureRefPrefix(currentBaseRef) != git.EnsureRefPrefix(c.BaseRef) {
-		return true, nil
-	}
-
-	return false, nil
-}
 
 // pick deterministically chooses between a and b a repo to keep and
 // discard. It is used when resolving conflicts on sourced repositories.
@@ -68,7 +21,7 @@ func pick(a *types.Repo, b *types.Repo) (keep, discard *types.Repo) {
 }
 
 type externalServiceLister interface {
-	List(context.Context, db.ExternalServicesListOptions) ([]*types.ExternalService, error)
+	List(context.Context, database.ExternalServicesListOptions) ([]*types.ExternalService, error)
 }
 
 // RateLimitSyncer syncs rate limits based on external service configuration
@@ -95,12 +48,12 @@ func NewRateLimitSyncer(registry *ratelimit.Registry, serviceLister externalServ
 func (r *RateLimitSyncer) SyncRateLimiters(ctx context.Context) error {
 	byURL := make(map[string]extsvc.RateLimitConfig)
 
-	cursor := db.LimitOffset{
+	cursor := database.LimitOffset{
 		Limit: int(r.limit),
 	}
 
 	for {
-		services, err := r.serviceLister.List(ctx, db.ExternalServicesListOptions{
+		services, err := r.serviceLister.List(ctx, database.ExternalServicesListOptions{
 			LimitOffset: &cursor,
 		})
 		if err != nil {

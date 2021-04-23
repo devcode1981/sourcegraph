@@ -1,12 +1,15 @@
-import { MarkupKind } from '@sourcegraph/extension-api-classes'
 import * as H from 'history'
 import React from 'react'
 import renderer from 'react-test-renderer'
 import { createRenderer } from 'react-test-renderer/shallow'
-import { NOOP_TELEMETRY_SERVICE } from '../telemetry/telemetryService'
-import { HoverOverlay, HoverOverlayProps } from './HoverOverlay'
 import { NEVER } from 'rxjs'
+
+import { MarkupKind } from '@sourcegraph/extension-api-classes'
+
+import { NOOP_TELEMETRY_SERVICE } from '../telemetry/telemetryService'
 import { subtypeOf } from '../util/types'
+
+import { HoverOverlay, HoverOverlayProps } from './HoverOverlay'
 
 const renderShallow = (element: React.ReactElement<HoverOverlayProps>): React.ReactElement => {
     const renderer = createRenderer()
@@ -67,7 +70,7 @@ describe('HoverOverlay', () => {
             renderShallow(
                 <HoverOverlay
                     {...commonProps}
-                    actionsOrError={[{ action: { id: 'a', command: 'c', title: 'Some title' } }]}
+                    actionsOrError={[{ action: { id: 'a', command: 'c', title: 'Some title' }, active: true }]}
                 />
             )
         ).toMatchSnapshot()
@@ -109,7 +112,7 @@ describe('HoverOverlay', () => {
             renderShallow(
                 <HoverOverlay
                     {...commonProps}
-                    actionsOrError={[{ action: { id: 'a', command: 'c' } }]}
+                    actionsOrError={[{ action: { id: 'a', command: 'c' }, active: true }]}
                     hoverOrError={{ contents: [{ kind: MarkupKind.Markdown, value: 'v' }] }}
                 />
             )
@@ -121,7 +124,7 @@ describe('HoverOverlay', () => {
             renderShallow(
                 <HoverOverlay
                     {...commonProps}
-                    actionsOrError={[{ action: { id: 'a', command: 'c' } }]}
+                    actionsOrError={[{ action: { id: 'a', command: 'c' }, active: true }]}
                     hoverOrError={{
                         contents: [{ kind: MarkupKind.Markdown, value: 'v' }],
                         alerts: [
@@ -144,7 +147,7 @@ describe('HoverOverlay', () => {
             renderShallow(
                 <HoverOverlay
                     {...commonProps}
-                    actionsOrError={[{ action: { id: 'a', command: 'c' } }]}
+                    actionsOrError={[{ action: { id: 'a', command: 'c' }, active: true }]}
                     hoverOrError="loading"
                 />
             )
@@ -204,7 +207,7 @@ describe('HoverOverlay', () => {
             renderShallow(
                 <HoverOverlay
                     {...commonProps}
-                    actionsOrError={[{ action: { id: 'a', command: 'c' } }]}
+                    actionsOrError={[{ action: { id: 'a', command: 'c' }, active: true }]}
                     hoverOrError={{ message: 'm', name: 'c' }}
                 />
             )

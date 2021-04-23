@@ -2,11 +2,11 @@ import '../../shared/polyfills'
 
 import { fromEvent, Subscription } from 'rxjs'
 import { first } from 'rxjs/operators'
-import { setLinkComponent, AnchorLink } from '../../../../shared/src/components/Link'
-import { storage } from '../web-extension-api/storage'
+
+import { setLinkComponent, AnchorLink } from '@sourcegraph/shared/src/components/Link'
+
 import { determineCodeHost } from '../../shared/code-hosts/shared/codeHost'
 import { injectCodeIntelligence } from '../../shared/code-hosts/shared/inject'
-import { initSentry } from '../../shared/sentry'
 import {
     checkIsSourcegraph,
     EXTENSION_MARKER_ID,
@@ -14,9 +14,11 @@ import {
     NATIVE_INTEGRATION_ACTIVATED,
     signalBrowserExtensionInstalled,
 } from '../../shared/code-hosts/sourcegraph/inject'
+import { initSentry } from '../../shared/sentry'
 import { DEFAULT_SOURCEGRAPH_URL, getAssetsURL } from '../../shared/util/context'
 import { featureFlags } from '../../shared/util/featureFlags'
 import { assertEnvironment } from '../environmentAssertion'
+import { storage } from '../web-extension-api/storage'
 
 const subscriptions = new Subscription()
 window.addEventListener('unload', () => subscriptions.unsubscribe(), { once: true })
@@ -68,33 +70,37 @@ async function main(): Promise<void> {
         return
     }
 
-    // Add style sheet and wait for it to load to avoid rendering unstyled elements (which causes an
-    // annoying flash/jitter when the stylesheet loads shortly thereafter).
-    const styleSheet = (() => {
-        let styleSheet = document.querySelector<HTMLLinkElement>('#ext-style-sheet')
-        // If does not exist, create
-        if (!styleSheet) {
-            styleSheet = document.createElement('link')
-            styleSheet.id = 'ext-style-sheet'
-            styleSheet.rel = 'stylesheet'
-            styleSheet.type = 'text/css'
-            styleSheet.href = browser.extension.getURL('css/style.bundle.css')
-        }
-        return styleSheet
-    })()
-    // If not loaded yet, wait for it to load
-    if (!styleSheet.sheet) {
-        await new Promise(resolve => {
-            styleSheet.addEventListener('load', resolve, { once: true })
-            // If not appended yet, append to <head>
-            if (!styleSheet.parentNode) {
-                document.head.append(styleSheet)
-            }
-        })
-    }
-
     subscriptions.add(
-        injectCodeIntelligence({ sourcegraphURL, assetsURL: getAssetsURL(DEFAULT_SOURCEGRAPH_URL) }, IS_EXTENSION)
+        await injectCodeIntelligence(
+            { sourcegraphURL, assetsURL: getAssetsURL(DEFAULT_SOURCEGRAPH_URL) },
+            IS_EXTENSION,
+            async function onCodeHostFound() {
+                // Add style sheet and wait for it to load to avoid rendering unstyled elements (which causes an
+                // annoying flash/jitter when the stylesheet loads shortly thereafter).
+                const styleSheet = (() => {
+                    let styleSheet = document.querySelector<HTMLLinkElement>('#ext-style-sheet')
+                    // If does not exist, create
+                    if (!styleSheet) {
+                        styleSheet = document.createElement('link')
+                        styleSheet.id = 'ext-style-sheet'
+                        styleSheet.rel = 'stylesheet'
+                        styleSheet.type = 'text/css'
+                        styleSheet.href = browser.extension.getURL('css/style.bundle.css')
+                    }
+                    return styleSheet
+                })()
+                // If not loaded yet, wait for it to load
+                if (!styleSheet.sheet) {
+                    await new Promise(resolve => {
+                        styleSheet.addEventListener('load', resolve, { once: true })
+                        // If not appended yet, append to <head>
+                        if (!styleSheet.parentNode) {
+                            document.head.append(styleSheet)
+                        }
+                    })
+                }
+            }
+        )
     )
 
     // Clean up susbscription if the native integration gets activated

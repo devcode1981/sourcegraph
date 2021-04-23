@@ -1,3 +1,5 @@
+/* eslint jsx-a11y/mouse-events-have-key-events: warn */
+import classNames from 'classnames'
 import * as H from 'history'
 import * as React from 'react'
 import { EMPTY, merge, of, Subject, Subscription } from 'rxjs'
@@ -12,9 +14,19 @@ import {
     switchMap,
     takeUntil,
 } from 'rxjs/operators'
-import { asError, ErrorLike, isErrorLike } from '../../../shared/src/util/errors'
-import { AbsoluteRepo } from '../../../shared/src/util/url'
+import { FileDecoration } from 'sourcegraph'
+
+import { FileDecorationsByPath } from '@sourcegraph/shared/src/api/extension/extensionHostApi'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { asError, ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { AbsoluteRepo } from '@sourcegraph/shared/src/util/url'
+
+import { getFileDecorations } from '../backend/features'
+import { ErrorAlert } from '../components/alerts'
+import { TreeFields } from '../graphql-operations'
 import { fetchTreeEntries } from '../repo/backend'
+
 import { ChildTreeLayer } from './ChildTreeLayer'
 import { Directory } from './Directory'
 import { File } from './File'
@@ -27,17 +39,8 @@ import {
     TreeEntryInfo,
     treePadding,
 } from './util'
-import { ErrorAlert } from '../components/alerts'
-import classNames from 'classnames'
-import { TreeFields } from '../graphql-operations'
-import { ExtensionsControllerProps } from '../../../shared/src/extensions/controller'
-import { FileDecoration } from 'sourcegraph'
-import { getFileDecorations } from '../backend/features'
-import { ThemeProps } from '../../../shared/src/theme'
-import { FileDecorationsByPath } from '../../../shared/src/api/extension/flatExtensionApi'
 
 export interface TreeLayerProps extends AbsoluteRepo, ExtensionsControllerProps, ThemeProps {
-    history: H.History
     location: H.Location
     activeNode: TreeNode
     activePath: string
@@ -288,6 +291,11 @@ export class TreeLayer extends React.Component<TreeLayerProps, TreeLayerState> {
         // Every other layer is a row in the file tree, and will fetch and render its children (if any) when expanded.
         return (
             <div>
+                {/*
+                    TODO: Improve accessibility here.
+                    We should support onFocus here but we currently do not let users focus directly on the actual items in this list.
+                    Issue: https://github.com/sourcegraph/sourcegraph/issues/19167
+                */}
                 <table className="tree-layer" onMouseOver={entryInfo.isDirectory ? this.invokeOnHover : undefined}>
                     <tbody>
                         {entryInfo.isDirectory ? (
@@ -312,7 +320,6 @@ export class TreeLayer extends React.Component<TreeLayerProps, TreeLayerState> {
                                                     style={treePadding(this.props.depth, true)}
                                                     error={treeOrError}
                                                     prefix="Error loading file tree"
-                                                    history={this.props.history}
                                                 />
                                             ) : (
                                                 treeOrError && (

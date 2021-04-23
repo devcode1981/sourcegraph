@@ -1,13 +1,17 @@
+/* eslint jsx-a11y/no-static-element-interactions: warn, jsx-a11y/tabindex-no-positive: warn, jsx-a11y/no-noninteractive-tabindex: warn */
 import * as H from 'history'
 import { isEqual } from 'lodash'
 import * as React from 'react'
 import { Subject, Subscription } from 'rxjs'
 import { distinctUntilChanged, startWith } from 'rxjs/operators'
 import { Key } from 'ts-key-enum'
-import { ExtensionsControllerProps } from '../../../shared/src/extensions/controller'
-import { ThemeProps } from '../../../shared/src/theme'
-import { AbsoluteRepo } from '../../../shared/src/util/url'
+
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { AbsoluteRepo } from '@sourcegraph/shared/src/util/url'
+
 import { dirname } from '../util/path'
+
 import { TreeRoot } from './TreeRoot'
 import { getDomElement, scrollIntoView } from './util'
 
@@ -294,7 +298,12 @@ export class Tree extends React.PureComponent<Props, State> {
 
     public render(): JSX.Element | null {
         return (
-            <div className="tree" tabIndex={1} onKeyDown={this.onKeyDown} ref={this.setTreeElement}>
+            /**
+             * TODO: Improve accessibility here.
+             * We should not be stealing focus here, we should let the user focus on the actual items listed.
+             * Issue: https://github.com/sourcegraph/sourcegraph/issues/19167
+             */
+            <div className="tree" tabIndex={0} onKeyDown={this.onKeyDown} ref={this.setTreeElement}>
                 <TreeRoot
                     ref={reference => {
                         if (reference) {
@@ -304,7 +313,6 @@ export class Tree extends React.PureComponent<Props, State> {
                     activeNode={this.state.activeNode}
                     activePath={this.props.activePath}
                     depth={0}
-                    history={this.props.history}
                     location={this.props.location}
                     repoName={this.props.repoName}
                     revision={this.props.revision}

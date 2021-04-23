@@ -7,7 +7,6 @@
    "Fork": false,
    "Archived": false,
    "Private": false,
-   "Cloned": false,
    "CreatedAt": "0001-01-01T00:00:00Z",
    "UpdatedAt": "0001-01-01T00:00:00Z",
    "DeletedAt": "0001-01-01T00:00:00Z",
@@ -19,7 +18,7 @@
    "Sources": {
     "extsvc:bitbucketserver:1": {
      "ID": "extsvc:bitbucketserver:1",
-     "CloneURL": "https://keegan:secret@bitbucket.example.com/scm/sg/go-langserver.git"
+     "CloneURL": "https://keegan@bitbucket.example.com/scm/sg/go-langserver.git"
     }
    },
    "Metadata": {
@@ -73,7 +72,6 @@
    "Fork": false,
    "Archived": false,
    "Private": true,
-   "Cloned": false,
    "CreatedAt": "0001-01-01T00:00:00Z",
    "UpdatedAt": "0001-01-01T00:00:00Z",
    "DeletedAt": "0001-01-01T00:00:00Z",
@@ -85,7 +83,7 @@
    "Sources": {
     "extsvc:bitbucketserver:1": {
      "ID": "extsvc:bitbucketserver:1",
-     "CloneURL": "https://keegan:secret@bitbucket.example.com/scm/sg/python-langserver.git"
+     "CloneURL": "https://keegan@bitbucket.example.com/scm/sg/python-langserver.git"
     }
    },
    "Metadata": {
@@ -139,7 +137,6 @@
    "Fork": true,
    "Archived": false,
    "Private": true,
-   "Cloned": false,
    "CreatedAt": "0001-01-01T00:00:00Z",
    "UpdatedAt": "0001-01-01T00:00:00Z",
    "DeletedAt": "0001-01-01T00:00:00Z",
@@ -151,7 +148,7 @@
    "Sources": {
     "extsvc:bitbucketserver:1": {
      "ID": "extsvc:bitbucketserver:1",
-     "CloneURL": "https://keegan:secret@bitbucket.example.com/scm/sg/python-langserver-fork.git"
+     "CloneURL": "https://keegan@bitbucket.example.com/scm/sg/python-langserver-fork.git"
     }
    },
    "Metadata": {
@@ -246,7 +243,6 @@
    "Fork": false,
    "Archived": false,
    "Private": true,
-   "Cloned": false,
    "CreatedAt": "0001-01-01T00:00:00Z",
    "UpdatedAt": "0001-01-01T00:00:00Z",
    "DeletedAt": "0001-01-01T00:00:00Z",
@@ -258,7 +254,7 @@
    "Sources": {
     "extsvc:bitbucketserver:1": {
      "ID": "extsvc:bitbucketserver:1",
-     "CloneURL": "https://keegan:secret@bitbucket.example.com/scm/~keegan/rgp.git"
+     "CloneURL": "https://keegan@bitbucket.example.com/scm/~keegan/rgp.git"
     }
    },
    "Metadata": {
@@ -312,7 +308,6 @@
    "Fork": false,
    "Archived": false,
    "Private": true,
-   "Cloned": false,
    "CreatedAt": "0001-01-01T00:00:00Z",
    "UpdatedAt": "0001-01-01T00:00:00Z",
    "DeletedAt": "0001-01-01T00:00:00Z",

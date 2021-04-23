@@ -3,7 +3,6 @@ package dbstore
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -12,65 +11,77 @@ import (
 
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/commitgraph"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/gitserver"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbconn"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbtesting"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbconn"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbtesting"
 )
 
-func TestGetDumpByID(t *testing.T) {
+func TestGetDumpsByIDs(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
 	dbtesting.SetupGlobalTestDB(t)
 	store := testStore()
 
-	// Dump does not exist initially
-	if _, exists, err := store.GetDumpByID(context.Background(), 1); err != nil {
+	// Dumps do not exist initially
+	if dumps, err := store.GetDumpsByIDs(context.Background(), []int{1, 2}); err != nil {
 		t.Fatalf("unexpected error getting dump: %s", err)
-	} else if exists {
+	} else if len(dumps) > 0 {
 		t.Fatal("unexpected record")
 	}
 
 	uploadedAt := time.Unix(1587396557, 0).UTC()
 	startedAt := uploadedAt.Add(time.Minute)
 	finishedAt := uploadedAt.Add(time.Minute * 2)
-	expected := Dump{
-		ID:             1,
-		Commit:         makeCommit(1),
-		Root:           "sub/",
-		VisibleAtTip:   true,
-		UploadedAt:     uploadedAt,
-		State:          "completed",
-		FailureMessage: nil,
-		StartedAt:      &startedAt,
-		FinishedAt:     &finishedAt,
-		RepositoryID:   50,
-		RepositoryName: "n-50",
-		Indexer:        "lsif-go",
+	expectedAssociatedIndexID := 42
+	expected1 := Dump{
+		ID:                1,
+		Commit:            makeCommit(1),
+		Root:              "sub/",
+		VisibleAtTip:      true,
+		UploadedAt:        uploadedAt,
+		State:             "completed",
+		FailureMessage:    nil,
+		StartedAt:         &startedAt,
+		FinishedAt:        &finishedAt,
+		RepositoryID:      50,
+		RepositoryName:    "n-50",
+		Indexer:           "lsif-go",
+		AssociatedIndexID: &expectedAssociatedIndexID,
+	}
+	expected2 := Dump{
+		ID:                2,
+		Commit:            makeCommit(2),
+		Root:              "other/",
+		VisibleAtTip:      false,
+		UploadedAt:        uploadedAt,
+		State:             "completed",
+		FailureMessage:    nil,
+		StartedAt:         &startedAt,
+		FinishedAt:        &finishedAt,
+		RepositoryID:      50,
+		RepositoryName:    "n-50",
+		Indexer:           "lsif-tsc",
+		AssociatedIndexID: nil,
 	}
 
-	insertUploads(t, dbconn.Global, Upload{
-		ID:             expected.ID,
-		Commit:         expected.Commit,
-		Root:           expected.Root,
-		UploadedAt:     expected.UploadedAt,
-		State:          expected.State,
-		FailureMessage: expected.FailureMessage,
-		StartedAt:      expected.StartedAt,
-		FinishedAt:     expected.FinishedAt,
-		ProcessAfter:   expected.ProcessAfter,
-		NumResets:      expected.NumResets,
-		NumFailures:    expected.NumFailures,
-		RepositoryID:   expected.RepositoryID,
-		RepositoryName: expected.RepositoryName,
-		Indexer:        expected.Indexer,
-	})
+	insertUploads(t, dbconn.Global, dumpToUpload(expected1), dumpToUpload(expected2))
 	insertVisibleAtTip(t, dbconn.Global, 50, 1)
 
-	if dump, exists, err := store.GetDumpByID(context.Background(), 1); err != nil {
+	if dumps, err := store.GetDumpsByIDs(context.Background(), []int{1}); err != nil {
 		t.Fatalf("unexpected error getting dump: %s", err)
-	} else if !exists {
-		t.Fatal("expected record to exist")
-	} else if diff := cmp.Diff(expected, dump); diff != "" {
+	} else if len(dumps) != 1 {
+		t.Fatal("expected one record")
+	} else if diff := cmp.Diff(expected1, dumps[0]); diff != "" {
+		t.Errorf("unexpected dump (-want +got):\n%s", diff)
+	}
+
+	if dumps, err := store.GetDumpsByIDs(context.Background(), []int{1, 2}); err != nil {
+		t.Fatalf("unexpected error getting dump: %s", err)
+	} else if len(dumps) != 2 {
+		t.Fatal("expected two records")
+	} else if diff := cmp.Diff(expected1, dumps[0]); diff != "" {
+		t.Errorf("unexpected dump (-want +got):\n%s", diff)
+	} else if diff := cmp.Diff(expected2, dumps[1]); diff != "" {
 		t.Errorf("unexpected dump (-want +got):\n%s", diff)
 	}
 }
@@ -587,69 +598,6 @@ func TestFindClosestDumpsFromGraphFragment(t *testing.T) {
 	})
 }
 
-func TestSoftDeleteOldDumps(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	dbtesting.SetupGlobalTestDB(t)
-	store := testStore()
-
-	t1 := time.Unix(1587396557, 0).UTC()
-	t2 := t1.Add(time.Minute)
-	t3 := t1.Add(time.Minute * 4)
-	t4 := t1.Add(time.Minute * 6)
-
-	insertUploads(t, dbconn.Global,
-		Upload{ID: 1, FinishedAt: &t1},
-		Upload{ID: 2, FinishedAt: &t2}, // visible
-		Upload{ID: 3, FinishedAt: &t2},
-		Upload{ID: 4, FinishedAt: &t3}, // visible
-		Upload{ID: 5, FinishedAt: &t3},
-		Upload{ID: 6, FinishedAt: &t4}, // too new
-		Upload{ID: 7, FinishedAt: &t4}, // too new
-	)
-	insertVisibleAtTip(t, dbconn.Global, 50, 2, 4)
-
-	if count, err := store.SoftDeleteOldDumps(context.Background(), time.Minute, t1.Add(time.Minute*6)); err != nil {
-		t.Fatalf("unexpected error pruning dumps: %s", err)
-	} else if count != 3 {
-		t.Fatalf("unexpected number of uploads deleted: want=%d have=%d", 3, count)
-	}
-
-	expectedStates := map[int]string{
-		1: "deleted",
-		2: "completed",
-		3: "deleted",
-		4: "completed",
-		5: "deleted",
-		6: "completed",
-		7: "completed",
-	}
-
-	// Ensure record was deleted
-	if states, err := getStates(1, 2, 3, 4, 5, 6, 7); err != nil {
-		t.Fatalf("unexpected error getting states: %s", err)
-	} else if diff := cmp.Diff(expectedStates, states); diff != "" {
-		t.Errorf("unexpected dump (-want +got):\n%s", diff)
-	}
-
-	// Ensure repository was marked as dirty
-	repositoryIDs, err := store.DirtyRepositories(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error listing dirty repositories: %s", err)
-	}
-
-	var keys []int
-	for repositoryID := range repositoryIDs {
-		keys = append(keys, repositoryID)
-	}
-	sort.Ints(keys)
-
-	if len(keys) != 1 || keys[0] != 50 {
-		t.Errorf("expected repository to be marked dirty")
-	}
-}
-
 type FindClosestDumpsTestCase struct {
 	commit              string
 	file                string
@@ -811,9 +759,9 @@ func TestDeleteOverlappingDumpsNoMatches(t *testing.T) {
 	}
 
 	// Original dump still exists
-	if _, exists, err := store.GetDumpByID(context.Background(), 1); err != nil {
+	if dumps, err := store.GetDumpsByIDs(context.Background(), []int{1}); err != nil {
 		t.Fatalf("unexpected error getting dump: %s", err)
-	} else if !exists {
+	} else if len(dumps) != 1 {
 		t.Fatal("expected dump record to still exist")
 	}
 }

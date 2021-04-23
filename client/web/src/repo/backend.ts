@@ -1,15 +1,16 @@
 import { Observable } from 'rxjs'
 import { map } from 'rxjs/operators'
+
 import {
     CloneInProgressError,
     RepoNotFoundError,
     RepoSeeOtherError,
     RevisionNotFoundError,
-} from '../../../shared/src/backend/errors'
-import { FetchFileParameters } from '../../../shared/src/components/CodeExcerpt'
-import { dataOrThrowErrors, gql } from '../../../shared/src/graphql/graphql'
-import { createAggregateError } from '../../../shared/src/util/errors'
-import { memoizeObservable } from '../../../shared/src/util/memoizeObservable'
+} from '@sourcegraph/shared/src/backend/errors'
+import { FetchFileParameters } from '@sourcegraph/shared/src/components/CodeExcerpt'
+import { dataOrThrowErrors, gql } from '@sourcegraph/shared/src/graphql/graphql'
+import { createAggregateError } from '@sourcegraph/shared/src/util/errors'
+import { memoizeObservable } from '@sourcegraph/shared/src/util/memoizeObservable'
 import {
     AbsoluteRepoFile,
     makeRepoURI,
@@ -17,7 +18,8 @@ import {
     RevisionSpec,
     RepoSpec,
     ResolvedRevisionSpec,
-} from '../../../shared/src/util/url'
+} from '@sourcegraph/shared/src/util/url'
+
 import { queryGraphQL, requestGraphQL } from '../backend/graphql'
 import {
     TreeFields,
@@ -30,7 +32,7 @@ import {
 export const externalLinkFieldsFragment = gql`
     fragment ExternalLinkFields on ExternalLink {
         url
-        serviceType
+        serviceKind
     }
 `
 
@@ -41,7 +43,7 @@ export const repositoryFragment = gql`
         url
         externalURLs {
             url
-            serviceType
+            serviceKind
         }
         description
         viewerCanAdminister
@@ -152,12 +154,15 @@ export const resolveRevision = memoizeObservable(
                 if (!data.repositoryRedirect.commit) {
                     throw new RevisionNotFoundError(revision)
                 }
-                if (!data.repositoryRedirect.defaultBranch || !data.repositoryRedirect.commit.tree) {
-                    throw new RevisionNotFoundError('HEAD')
+
+                const defaultBranch = data.repositoryRedirect.defaultBranch?.abbrevName || 'HEAD'
+
+                if (!data.repositoryRedirect.commit.tree) {
+                    throw new RevisionNotFoundError(defaultBranch)
                 }
                 return {
                     commitID: data.repositoryRedirect.commit.oid,
-                    defaultBranch: data.repositoryRedirect.defaultBranch.abbrevName,
+                    defaultBranch,
                     rootTreeURL: data.repositoryRedirect.commit.tree.url,
                 }
             })
@@ -210,9 +215,9 @@ export const fetchHighlightedFileLineRanges = memoizeObservable(
         ),
     context =>
         makeRepoURI(context) +
-        `?disableTimeout=${String(context.disableTimeout)}&isLightTheme=${String(context.isLightTheme)}&ranges=${String(
-            context.ranges
-        )}`
+        `?disableTimeout=${String(context.disableTimeout)}&isLightTheme=${String(
+            context.isLightTheme
+        )}&ranges=${context.ranges.map(range => `${range.startLine}:${range.endLine}`).join(',')}`
 )
 
 export const fetchFileExternalLinks = memoizeObservable(

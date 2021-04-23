@@ -1,4 +1,5 @@
 import got from 'got'
+
 import { readLine, cacheFolder } from './util'
 
 export async function postMessage(message: string, channel: string): Promise<void> {
@@ -9,4 +10,8 @@ export async function postMessage(message: string, channel: string): Promise<voi
     await got.post(webhookURL, {
         body: JSON.stringify({ text: message, link_names: true }),
     })
+}
+
+export function slackURL(text: string, url: string): string {
+    return `<${url}|${text}>`
 }

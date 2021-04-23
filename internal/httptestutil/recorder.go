@@ -8,6 +8,7 @@ import (
 
 	"github.com/dnaeon/go-vcr/cassette"
 	"github.com/dnaeon/go-vcr/recorder"
+
 	"github.com/sourcegraph/sourcegraph/internal/httpcli"
 )
 
@@ -25,6 +26,8 @@ func NewRecorder(file string, record bool, filters ...cassette.Filter) (*recorde
 
 	filters = append(filters, func(i *cassette.Interaction) error {
 		delete(i.Request.Headers, "Authorization")
+		// This is used for GitLab.
+		delete(i.Request.Headers, "Private-Token")
 		delete(i.Response.Headers, "Set-Cookie")
 		return nil
 	})
@@ -60,7 +63,7 @@ func NewRecorderOpt(rec *recorder.Recorder) httpcli.Opt {
 func NewGitHubRecorderFactory(t testing.TB, update bool, name string) (*httpcli.Factory, func()) {
 	t.Helper()
 
-	cassete := filepath.Join("testdata/vcr/", strings.Replace(name, " ", "-", -1))
+	cassete := filepath.Join("testdata/vcr/", strings.ReplaceAll(name, " ", "-"))
 
 	rec, err := NewRecorder(cassete, update, func(i *cassette.Interaction) error {
 		return nil

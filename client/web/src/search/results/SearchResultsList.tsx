@@ -1,39 +1,51 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import * as H from 'history'
 import { isEqual } from 'lodash'
 import FileIcon from 'mdi-react/FileIcon'
 import SearchIcon from 'mdi-react/SearchIcon'
+import SourceCommitIcon from 'mdi-react/SourceCommitIcon'
 import SourceRepositoryIcon from 'mdi-react/SourceRepositoryIcon'
+import SourceRepositoryMultipleIcon from 'mdi-react/SourceRepositoryMultipleIcon'
 import * as React from 'react'
 import { Link } from 'react-router-dom'
 import { Observable, Subject, Subscription } from 'rxjs'
 import { debounceTime, distinctUntilChanged, filter, first, map, skip, skipUntil } from 'rxjs/operators'
-import { parseSearchURLQuery, PatternTypeProps, InteractiveSearchProps, CaseSensitivityProps } from '..'
-import { FetchFileParameters } from '../../../../shared/src/components/CodeExcerpt'
-import { FileMatch } from '../../../../shared/src/components/FileMatch'
-import { displayRepoName } from '../../../../shared/src/components/RepoFileLink'
-import { VirtualList } from '../../../../shared/src/components/VirtualList'
-import { ExtensionsControllerProps } from '../../../../shared/src/extensions/controller'
-import * as GQL from '../../../../shared/src/graphql/schema'
-import { PlatformContextProps } from '../../../../shared/src/platform/context'
-import { SettingsCascadeProps } from '../../../../shared/src/settings/settings'
-import { TelemetryProps } from '../../../../shared/src/telemetry/telemetryService'
-import { ErrorLike, isErrorLike } from '../../../../shared/src/util/errors'
-import { isDefined, hasProperty } from '../../../../shared/src/util/types'
-import { SearchResult } from '../../components/SearchResult'
-import { SavedSearchModal } from '../../savedSearches/SavedSearchModal'
-import { ThemeProps } from '../../../../shared/src/theme'
-import { eventLogger } from '../../tracking/eventLogger'
-import { SearchResultsInfoBar } from './SearchResultsInfoBar'
-import { ErrorAlert } from '../../components/alerts'
-import { VersionContextProps } from '../../../../shared/src/search/util'
-import { DeployType } from '../../jscontext'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { FetchFileParameters } from '@sourcegraph/shared/src/components/CodeExcerpt'
+import { FileMatch } from '@sourcegraph/shared/src/components/FileMatch'
+import { displayRepoName } from '@sourcegraph/shared/src/components/RepoFileLink'
+import { VirtualList } from '@sourcegraph/shared/src/components/VirtualList'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { VersionContextProps } from '@sourcegraph/shared/src/search/util'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { isDefined, hasProperty } from '@sourcegraph/shared/src/util/types'
+
+import {
+    parseSearchURLQuery,
+    PatternTypeProps,
+    CaseSensitivityProps,
+    ParsedSearchQueryProps,
+    SearchContextProps,
+} from '..'
 import { AuthenticatedUser } from '../../auth'
-import { SearchResultTypeTabs } from './SearchResultTypeTabs'
-import { QueryState } from '../helpers'
+import { CodeMonitoringProps } from '../../code-monitoring'
+import { ErrorAlert } from '../../components/alerts'
+import { SearchResult } from '../../components/SearchResult'
+import { DeployType } from '../../jscontext'
+import { SavedSearchModal } from '../../savedSearches/SavedSearchModal'
 import { PerformanceWarningAlert } from '../../site/PerformanceWarningAlert'
-import { SearchResultsStats } from './SearchResultsStats'
+import { eventLogger } from '../../tracking/eventLogger'
+import { QueryState } from '../helpers'
+
 import { SearchAlert } from './SearchAlert'
+import { SearchResultsInfoBar } from './SearchResultsInfoBar'
+import { SearchResultsStats } from './SearchResultsStats'
+import { SearchResultTypeTabs } from './SearchResultTypeTabs'
 
 const isSearchResults = (value: unknown): value is GQL.ISearchResults =>
     typeof value === 'object' &&
@@ -42,15 +54,17 @@ const isSearchResults = (value: unknown): value is GQL.ISearchResults =>
     value.__typename === 'SearchResults'
 
 export interface SearchResultsListProps
-    extends ExtensionsControllerProps<'executeCommand' | 'services'>,
+    extends ExtensionsControllerProps<'executeCommand' | 'extHostAPI'>,
         PlatformContextProps<'forceUpdateTooltip' | 'settings'>,
         TelemetryProps,
         SettingsCascadeProps,
         ThemeProps,
+        Pick<ParsedSearchQueryProps, 'parsedSearchQuery'>,
         PatternTypeProps,
         CaseSensitivityProps,
-        InteractiveSearchProps,
-        VersionContextProps {
+        VersionContextProps,
+        CodeMonitoringProps,
+        Pick<SearchContextProps, 'selectedSearchContextSpec'> {
     location: H.Location
     history: H.History
     authenticatedUser: AuthenticatedUser | null
@@ -74,8 +88,6 @@ export interface SearchResultsListProps
     showSavedQueryModal: boolean
     onSavedQueryModalClose: () => void
     onSaveQueryClick: () => void
-
-    interactiveSearchMode: boolean
 
     fetchHighlightedFileLineRanges: (parameters: FetchFileParameters, force?: boolean) => Observable<string[][]>
     shouldDisplayPerformanceWarning: (deployType: DeployType) => Observable<boolean>
@@ -323,11 +335,11 @@ export class SearchResultsList extends React.PureComponent<SearchResultsListProp
         return (
             <>
                 {this.state.didScrollToItem && (
-                    <div className="search-results-list__jump-to-top">
+                    <div className="search-results-list__jump-to-top d-flex align-items-center justify-content-center">
                         Scrolled to result {this.getCheckpoint()} based on URL.&nbsp;
-                        <a href="#" onClick={this.nextJumpToTopClick}>
+                        <button type="button" className="btn btn-link p-0" onClick={this.nextJumpToTopClick}>
                             Jump to top.
-                        </a>
+                        </button>
                     </div>
                 )}
 
@@ -352,7 +364,6 @@ export class SearchResultsList extends React.PureComponent<SearchResultsListProp
                             className="m-2"
                             data-testid="search-results-list-error"
                             error={this.props.resultsOrError}
-                            history={this.props.history}
                         />
                     ) : (
                         (() => {
@@ -364,7 +375,6 @@ export class SearchResultsList extends React.PureComponent<SearchResultsListProp
                                         <SearchResultTypeTabs
                                             {...this.props}
                                             query={this.props.navbarSearchQueryState.query}
-                                            filtersInQuery={this.props.filtersInQuery}
                                             className="search-results-list__tabs"
                                         />
 
@@ -416,13 +426,14 @@ export class SearchResultsList extends React.PureComponent<SearchResultsListProp
                                     )}
 
                                     {/* Results */}
-                                    <VirtualList
+                                    <VirtualList<GQL.SearchResult>
                                         itemsToShow={this.state.resultsShown}
                                         onShowMoreItems={this.onBottomHit(results.results.length)}
                                         onVisibilityChange={this.nextItemVisibilityChange}
-                                        items={results.results
-                                            .map((result, index) => this.renderResult(result, index === 0))
-                                            .filter(isDefined)}
+                                        items={results.results}
+                                        itemKey={this.itemKey}
+                                        itemProps={undefined}
+                                        renderItem={this.renderResult}
                                         containment={this.scrollableElementRef || undefined}
                                         onRef={this.nextVirtualListContainerElement}
                                     />
@@ -467,7 +478,7 @@ export class SearchResultsList extends React.PureComponent<SearchResultsListProp
 
                     <div className="pb-4" />
                     {this.props.resultsOrError !== undefined && (
-                        <Link className="mb-4 p-3" to="/help/user/search">
+                        <Link className="mb-4 p-3" to="/help/code_search">
                             Learn more about our search syntax.
                         </Link>
                     )}
@@ -495,18 +506,13 @@ export class SearchResultsList extends React.PureComponent<SearchResultsListProp
         )
     }
 
-    private renderResult(
-        result: GQL.GenericSearchResultInterface | GQL.IFileMatch,
-        isFirst: boolean
-    ): JSX.Element | undefined {
+    private renderResult = (result: GQL.GenericSearchResultInterface | GQL.IFileMatch): JSX.Element => {
         switch (result.__typename) {
             case 'FileMatch':
                 return (
                     <FileMatch
-                        key={'file:' + result.file.url}
                         location={this.props.location}
                         eventLogger={eventLogger}
-                        onFirstResultLoad={isFirst ? this.props.onFirstResultLoad : undefined}
                         icon={result.lineMatches && result.lineMatches.length > 0 ? SourceRepositoryIcon : FileIcon}
                         result={result}
                         onSelect={this.logEvent}
@@ -519,15 +525,32 @@ export class SearchResultsList extends React.PureComponent<SearchResultsListProp
                         settingsCascade={this.props.settingsCascade}
                     />
                 )
+            case 'CommitSearchResult':
+                return (
+                    <SearchResult
+                        icon={SourceCommitIcon}
+                        result={result}
+                        isLightTheme={this.props.isLightTheme}
+                        history={this.props.history}
+                    />
+                )
+            case 'Repository':
+                return (
+                    <SearchResult
+                        icon={SourceRepositoryMultipleIcon}
+                        result={result}
+                        isLightTheme={this.props.isLightTheme}
+                        history={this.props.history}
+                    />
+                )
         }
-        return (
-            <SearchResult
-                key={result.url}
-                result={result}
-                isLightTheme={this.props.isLightTheme}
-                history={this.props.history}
-            />
-        )
+    }
+
+    private itemKey = (item: GQL.GenericSearchResultInterface | GQL.IFileMatch): string => {
+        if (item.__typename === 'FileMatch') {
+            return `file:${item.file.url}`
+        }
+        return item.url
     }
 
     /** onBottomHit increments the amount of results to be shown when we have scrolled to the bottom of the list. */

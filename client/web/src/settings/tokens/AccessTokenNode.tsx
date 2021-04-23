@@ -1,14 +1,13 @@
 import React, { useCallback, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { map, mapTo } from 'rxjs/operators'
-import { dataOrThrowErrors, gql } from '../../../../shared/src/graphql/graphql'
-import { asError, isErrorLike } from '../../../../shared/src/util/errors'
+
+import { dataOrThrowErrors, gql } from '@sourcegraph/shared/src/graphql/graphql'
+import { asError, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+
 import { requestGraphQL } from '../../backend/graphql'
-import { Timestamp } from '../../components/time/Timestamp'
-import { userURL } from '../../user'
-import { AccessTokenCreatedAlert } from './AccessTokenCreatedAlert'
 import { ErrorAlert } from '../../components/alerts'
-import * as H from 'history'
+import { Timestamp } from '../../components/time/Timestamp'
 import {
     AccessTokenFields,
     CreateAccessTokenResult,
@@ -16,6 +15,9 @@ import {
     DeleteAccessTokenVariables,
     Scalars,
 } from '../../graphql-operations'
+import { userURL } from '../../user'
+
+import { AccessTokenCreatedAlert } from './AccessTokenCreatedAlert'
 
 export const accessTokenFragment = gql`
     fragment AccessTokenFields on AccessToken {
@@ -60,7 +62,6 @@ export interface AccessTokenNodeProps {
     showSubject: boolean
 
     afterDelete: () => void
-    history: H.History
 }
 
 export const AccessTokenNode: React.FunctionComponent<AccessTokenNodeProps> = ({
@@ -68,7 +69,6 @@ export const AccessTokenNode: React.FunctionComponent<AccessTokenNodeProps> = ({
     showSubject,
     newToken,
     afterDelete,
-    history,
 }) => {
     const [isDeleting, setIsDeleting] = useState<boolean | Error>(false)
     const onDeleteAccessToken = useCallback(async () => {
@@ -136,7 +136,7 @@ export const AccessTokenNode: React.FunctionComponent<AccessTokenNodeProps> = ({
                     >
                         Delete
                     </button>
-                    {isErrorLike(isDeleting) && <ErrorAlert className="mt-2" error={isDeleting} history={history} />}
+                    {isErrorLike(isDeleting) && <ErrorAlert className="mt-2" error={isDeleting} />}
                 </div>
             </div>
             {newToken && node.id === newToken.id && (

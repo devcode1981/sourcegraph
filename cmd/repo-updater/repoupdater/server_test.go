@@ -16,15 +16,14 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/uuid"
 	"github.com/inconshreveable/log15"
 	"github.com/opentracing/opentracing-go"
 
 	"github.com/sourcegraph/sourcegraph/internal/api"
-	idb "github.com/sourcegraph/sourcegraph/internal/db"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbtest"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbtesting"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbtest"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc"
+	"github.com/sourcegraph/sourcegraph/internal/extsvc/auth"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc/awscodecommit"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc/bitbucketserver"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc/github"
@@ -33,6 +32,7 @@ import (
 	"github.com/sourcegraph/sourcegraph/internal/repos"
 	"github.com/sourcegraph/sourcegraph/internal/repoupdater"
 	"github.com/sourcegraph/sourcegraph/internal/repoupdater/protocol"
+	"github.com/sourcegraph/sourcegraph/internal/timeutil"
 	"github.com/sourcegraph/sourcegraph/internal/trace"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 )
@@ -65,7 +65,6 @@ func TestIntegration(t *testing.T) {
 		{"Server/SetRepoEnabled", testServerSetRepoEnabled},
 		{"Server/EnqueueRepoUpdate", testServerEnqueueRepoUpdate},
 		{"Server/RepoExternalServices", testServerRepoExternalServices},
-		{"Server/StatusMessages", testServerStatusMessages},
 		{"Server/RepoLookup", testRepoLookup(db)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -306,13 +305,12 @@ func testServerSetRepoEnabled(t *testing.T, store *repos.Store) func(t *testing.
 						tmp := &types.Repo{
 							ID:           k.repo.ID,
 							ExternalRepo: k.repo.ExternalRepo,
-							Name:         api.RepoName(k.repo.Name),
+							Name:         k.repo.Name,
 							Private:      k.repo.Private,
 							URI:          k.repo.URI,
 							Description:  k.repo.Description,
 							Fork:         k.repo.Fork,
 							Archived:     k.repo.Archived,
-							Cloned:       k.repo.Cloned,
 							CreatedAt:    k.repo.CreatedAt,
 							UpdatedAt:    k.repo.UpdatedAt,
 							DeletedAt:    k.repo.DeletedAt,
@@ -347,7 +345,7 @@ func testServerSetRepoEnabled(t *testing.T, store *repos.Store) func(t *testing.
 				s := &Server{Store: store}
 				srv := httptest.NewServer(s.Handler())
 				defer srv.Close()
-				cli := repoupdater.Client{URL: srv.URL}
+				cli := repoupdater.NewClient(srv.URL)
 
 				if tc.err == "" {
 					tc.err = "<nil>"
@@ -380,7 +378,7 @@ func testServerSetRepoEnabled(t *testing.T, store *repos.Store) func(t *testing.
 					ids = append(ids, s.ID)
 				}
 
-				svcs, err := store.ExternalServiceStore.List(ctx, idb.ExternalServicesListOptions{
+				svcs, err := store.ExternalServiceStore.List(ctx, database.ExternalServicesListOptions{
 					IDs:              ids,
 					OrderByDirection: "ASC",
 				})
@@ -389,8 +387,8 @@ func testServerSetRepoEnabled(t *testing.T, store *repos.Store) func(t *testing.
 				}
 
 				have, want := apiExternalServices(svcs...), res.ExternalServices
-				if !reflect.DeepEqual(have, want) {
-					t.Errorf("stored external services:\n%s", cmp.Diff(have, want))
+				if diff := cmp.Diff(have, want); diff != "" {
+					t.Errorf("stored external services:\n%s", diff)
 				}
 			})
 		}
@@ -439,7 +437,7 @@ func testServerEnqueueRepoUpdate(t *testing.T, store *repos.Store) func(t *testi
 		var testCases []testCase
 		testCases = append(testCases,
 			func() testCase {
-				idb.Mocks.Repos.List = func(v0 context.Context, v1 idb.ReposListOptions) ([]*types.Repo, error) {
+				database.Mocks.Repos.List = func(v0 context.Context, v1 database.ReposListOptions) ([]*types.Repo, error) {
 					return nil, errors.New("boom")
 				}
 				return testCase{
@@ -447,7 +445,7 @@ func testServerEnqueueRepoUpdate(t *testing.T, store *repos.Store) func(t *testi
 					store: store,
 					err:   `store.list-repos: boom`,
 					teardown: func() {
-						idb.Mocks.Repos = idb.MockRepos{}
+						database.Mocks.Repos = database.MockRepos{}
 					},
 				}
 			}(),
@@ -483,7 +481,7 @@ func testServerEnqueueRepoUpdate(t *testing.T, store *repos.Store) func(t *testi
 				s := &Server{Store: tc.store, Scheduler: &fakeScheduler{}}
 				srv := httptest.NewServer(s.Handler())
 				defer srv.Close()
-				cli := repoupdater.Client{URL: srv.URL}
+				cli := repoupdater.NewClient(srv.URL)
 
 				if tc.err == "" {
 					tc.err = "<nil>"
@@ -584,7 +582,7 @@ func testServerRepoExternalServices(t *testing.T, store *repos.Store) func(t *te
 		s := &Server{Store: store}
 		srv := httptest.NewServer(s.Handler())
 		defer srv.Close()
-		cli := repoupdater.Client{URL: srv.URL}
+		cli := repoupdater.NewClient(srv.URL)
 		for _, tc := range testCases {
 			tc := tc
 			t.Run(tc.name, func(t *testing.T) {
@@ -593,222 +591,9 @@ func testServerRepoExternalServices(t *testing.T, store *repos.Store) func(t *te
 					t.Errorf("have err: %q, want: %q", have, want)
 				}
 
-				if have, want := res, tc.svcs; !reflect.DeepEqual(have, want) {
+				have, want := res, tc.svcs
+				if diff := cmp.Diff(have, want); diff != "" {
 					t.Errorf("response:\n%s", cmp.Diff(have, want))
-				}
-			})
-		}
-	}
-}
-
-func testServerStatusMessages(t *testing.T, store *repos.Store) func(t *testing.T) {
-	return func(t *testing.T) {
-		ctx := context.Background()
-
-		githubService := &types.ExternalService{
-			ID:          1,
-			Config:      `{}`,
-			Kind:        extsvc.KindGitHub,
-			DisplayName: "github.com - test",
-		}
-
-		err := store.ExternalServiceStore.Upsert(ctx, githubService)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		testCases := []struct {
-			name            string
-			stored          types.Repos
-			gitserverCloned []string
-			sourcerErr      error
-			listRepoErr     error
-			res             *protocol.StatusMessagesResponse
-			err             string
-		}{
-			{
-				name:            "all cloned",
-				gitserverCloned: []string{"foobar"},
-				stored:          []*types.Repo{{Name: "foobar", Cloned: true}},
-				res: &protocol.StatusMessagesResponse{
-					Messages: []protocol.StatusMessage{},
-				},
-			},
-			{
-				name:            "nothing cloned",
-				stored:          []*types.Repo{{Name: "foobar"}},
-				gitserverCloned: []string{},
-				res: &protocol.StatusMessagesResponse{
-					Messages: []protocol.StatusMessage{
-						{
-							Cloning: &protocol.CloningProgress{
-								Message: "1 repositories enqueued for cloning...",
-							},
-						},
-					},
-				},
-			},
-			{
-				name:            "subset cloned",
-				stored:          []*types.Repo{{Name: "foobar", Cloned: true}, {Name: "barfoo"}},
-				gitserverCloned: []string{"foobar"},
-				res: &protocol.StatusMessagesResponse{
-					Messages: []protocol.StatusMessage{
-						{
-							Cloning: &protocol.CloningProgress{
-								Message: "1 repositories enqueued for cloning...",
-							},
-						},
-					},
-				},
-			},
-			{
-				name:            "more cloned than stored",
-				stored:          []*types.Repo{{Name: "foobar", Cloned: true}},
-				gitserverCloned: []string{"foobar", "barfoo"},
-				res: &protocol.StatusMessagesResponse{
-					Messages: []protocol.StatusMessage{},
-				},
-			},
-			{
-				name:            "cloned different than stored",
-				stored:          []*types.Repo{{Name: "foobar"}, {Name: "barfoo"}},
-				gitserverCloned: []string{"one", "two", "three"},
-				res: &protocol.StatusMessagesResponse{
-					Messages: []protocol.StatusMessage{
-						{
-							Cloning: &protocol.CloningProgress{
-								Message: "2 repositories enqueued for cloning...",
-							},
-						},
-					},
-				},
-			},
-			{
-				name:            "case insensitivity",
-				gitserverCloned: []string{"foobar"},
-				stored:          []*types.Repo{{Name: "FOOBar", Cloned: true}},
-				res: &protocol.StatusMessagesResponse{
-					Messages: []protocol.StatusMessage{},
-				},
-			},
-			{
-				name:            "case insensitivity to gitserver names",
-				gitserverCloned: []string{"FOOBar"},
-				stored:          []*types.Repo{{Name: "FOOBar", Cloned: true}},
-				res: &protocol.StatusMessagesResponse{
-					Messages: []protocol.StatusMessage{},
-				},
-			},
-			{
-				name:       "one external service syncer err",
-				sourcerErr: errors.New("github is down"),
-				res: &protocol.StatusMessagesResponse{
-					Messages: []protocol.StatusMessage{
-						{
-							ExternalServiceSyncError: &protocol.ExternalServiceSyncError{
-								Message:           "github is down",
-								ExternalServiceId: githubService.ID,
-							},
-						},
-					},
-				},
-			},
-			{
-				name:        "one syncer err",
-				listRepoErr: errors.New("could not connect to database"),
-				res: &protocol.StatusMessagesResponse{
-					Messages: []protocol.StatusMessage{
-						{
-							SyncError: &protocol.SyncError{
-								Message: "syncer.sync.store.list-repos: could not connect to database",
-							},
-						},
-					},
-				},
-			},
-		}
-
-		for _, tc := range testCases {
-			tc := tc
-			ctx := context.Background()
-
-			t.Run(tc.name, func(t *testing.T) {
-				gitserverClient := &fakeGitserverClient{listClonedResponse: tc.gitserverCloned}
-
-				stored := tc.stored.Clone()
-				var cloned []string
-				for _, r := range stored {
-					r.ExternalRepo = api.ExternalRepoSpec{
-						ID:          uuid.New().String(),
-						ServiceType: extsvc.TypeGitHub,
-						ServiceID:   "https://github.com/",
-					}
-					if r.Cloned {
-						cloned = append(cloned, string(r.Name))
-					}
-				}
-
-				err := store.RepoStore.Create(ctx, stored...)
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				t.Cleanup(func() {
-					ids := make([]api.RepoID, 0, len(stored))
-					for _, r := range stored {
-						ids = append(ids, r.ID)
-					}
-					err := store.RepoStore.Delete(ctx, ids...)
-					if err != nil {
-						t.Fatal(err)
-					}
-				})
-
-				err = store.SetClonedRepos(ctx, cloned...)
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				clock := dbtesting.NewFakeClock(time.Now(), 0)
-				syncer := &repos.Syncer{
-					Now: clock.Now,
-				}
-
-				if tc.sourcerErr != nil || tc.listRepoErr != nil {
-					idb.Mocks.Repos.List = func(v0 context.Context, v1 idb.ReposListOptions) ([]*types.Repo, error) {
-						return nil, tc.listRepoErr
-					}
-					defer func() {
-						idb.Mocks.Repos.List = nil
-					}()
-					sourcer := repos.NewFakeSourcer(tc.sourcerErr, repos.NewFakeSource(githubService, nil))
-					// Run Sync so that possibly `LastSyncErrors` is set
-					syncer.Sourcer = sourcer
-					_ = syncer.SyncExternalService(ctx, store, githubService.ID, time.Millisecond)
-				}
-
-				s := &Server{
-					Syncer:          syncer,
-					Store:           store,
-					GitserverClient: gitserverClient,
-				}
-
-				srv := httptest.NewServer(s.Handler())
-				defer srv.Close()
-				cli := repoupdater.Client{URL: srv.URL}
-
-				if tc.err == "" {
-					tc.err = "<nil>"
-				}
-
-				res, err := cli.StatusMessages(ctx)
-				if have, want := fmt.Sprint(err), tc.err; have != want {
-					t.Errorf("have err: %q, want: %q", have, want)
-				}
-
-				if have, want := res, tc.res; !reflect.DeepEqual(have, want) {
-					t.Errorf("response: %s", cmp.Diff(have, want))
 				}
 			})
 		}
@@ -845,7 +630,7 @@ func testRepoLookup(db *sql.DB) func(t *testing.T, repoStore *repos.Store) func(
 	return func(t *testing.T, store *repos.Store) func(t *testing.T) {
 		return func(t *testing.T) {
 			ctx := context.Background()
-			clock := dbtesting.NewFakeClock(time.Now(), 0)
+			clock := timeutil.NewFakeClock(time.Now(), 0)
 			now := clock.Now()
 
 			githubSource := types.ExternalService{
@@ -1075,7 +860,7 @@ func testRepoLookup(db *sql.DB) func(t *testing.T, repoStore *repos.Store) func(
 						Repo: api.RepoName("github.com/foo/bar"),
 					},
 					githubDotComSource: &fakeRepoSource{
-						err: github.ErrNotFound,
+						err: github.ErrRepoNotFound,
 					},
 					result: &protocol.RepoLookupResult{ErrorNotFound: true},
 					err:    fmt.Sprintf("repository not found (name=%s notfound=%v)", api.RepoName("github.com/foo/bar"), true),
@@ -1172,7 +957,7 @@ func testRepoLookup(db *sql.DB) func(t *testing.T, repoStore *repos.Store) func(
 				{
 					name: "Private repos are not supported on sourcegraph.com",
 					args: protocol.RepoLookupArgs{
-						Repo: api.RepoName(githubRepository.Name),
+						Repo: githubRepository.Name,
 					},
 					githubDotComSource: &fakeRepoSource{
 						repo: githubRepository.With(func(r *types.Repo) {
@@ -1180,15 +965,15 @@ func testRepoLookup(db *sql.DB) func(t *testing.T, repoStore *repos.Store) func(
 						}),
 					},
 					result: &protocol.RepoLookupResult{ErrorNotFound: true},
-					err:    fmt.Sprintf("repository not found (name=%s notfound=%v)", api.RepoName(githubRepository.Name), true),
+					err:    fmt.Sprintf("repository not found (name=%s notfound=%v)", githubRepository.Name, true),
 				},
 				{
 					name: "Private repos that used to be public should be removed asynchronously",
 					args: protocol.RepoLookupArgs{
-						Repo: api.RepoName(githubRepository.Name),
+						Repo: githubRepository.Name,
 					},
 					githubDotComSource: &fakeRepoSource{
-						err: github.ErrNotFound,
+						err: github.ErrRepoNotFound,
 					},
 					stored: []*types.Repo{githubRepository},
 					result: &protocol.RepoLookupResult{Repo: &protocol.RepoInfo{
@@ -1259,7 +1044,7 @@ func testRepoLookup(db *sql.DB) func(t *testing.T, repoStore *repos.Store) func(
 					srv := httptest.NewServer(s.Handler())
 					defer srv.Close()
 
-					cli := repoupdater.Client{URL: srv.URL}
+					cli := repoupdater.NewClient(srv.URL)
 
 					if tc.err == "" {
 						tc.err = "<nil>"
@@ -1282,7 +1067,7 @@ func testRepoLookup(db *sql.DB) func(t *testing.T, repoStore *repos.Store) func(
 						if tc.assertDelay != 0 {
 							time.Sleep(tc.assertDelay)
 						}
-						rs, err := store.RepoStore.List(ctx, idb.ReposListOptions{})
+						rs, err := store.RepoStore.List(ctx, database.ReposListOptions{})
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -1308,14 +1093,6 @@ type fakeScheduler struct{}
 func (s *fakeScheduler) UpdateOnce(_ api.RepoID, _ api.RepoName) {}
 func (s *fakeScheduler) ScheduleInfo(id api.RepoID) *protocol.RepoUpdateSchedulerInfoResult {
 	return &protocol.RepoUpdateSchedulerInfoResult{}
-}
-
-type fakeGitserverClient struct {
-	listClonedResponse []string
-}
-
-func (g *fakeGitserverClient) ListCloned(ctx context.Context) ([]string, error) {
-	return g.listClonedResponse, nil
 }
 
 type fakePermsSyncer struct{}
@@ -1396,6 +1173,49 @@ func TestServer_handleSchedulePermsSync(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExternalServiceValidate_ValidatesToken(t *testing.T) {
+	var (
+		src    repos.Source
+		called bool
+		ctx    = context.Background()
+	)
+	src = testSource{
+		fn: func() error {
+			called = true
+			return nil
+		},
+	}
+	err := externalServiceValidate(ctx, protocol.ExternalServiceSyncRequest{}, src)
+	if err != nil {
+		t.Errorf("expected nil, got %v", err)
+	}
+	if !called {
+		t.Errorf("expected called, got not called")
+	}
+}
+
+type testSource struct {
+	fn func() error
+}
+
+var _ repos.Source = &testSource{}
+var _ repos.UserSource = &testSource{}
+
+func (t testSource) ListRepos(ctx context.Context, results chan repos.SourceResult) {
+}
+
+func (t testSource) ExternalServices() types.ExternalServices {
+	return nil
+}
+
+func (t testSource) WithAuthenticator(a auth.Authenticator) (repos.Source, error) {
+	return t, nil
+}
+
+func (t testSource) ValidateAuthenticator(ctx context.Context) error {
+	return t.fn()
 }
 
 func formatJSON(s string) string {

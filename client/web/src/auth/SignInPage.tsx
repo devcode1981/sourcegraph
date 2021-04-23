@@ -1,19 +1,21 @@
+import classNames from 'classnames'
 import * as H from 'history'
+import { partition } from 'lodash'
+import GithubIcon from 'mdi-react/GithubIcon'
 import React, { useEffect, useState } from 'react'
 import { Link, Redirect } from 'react-router-dom'
+
+import { AuthenticatedUser } from '../auth'
+import { ErrorAlert } from '../components/alerts'
 import { HeroPage } from '../components/HeroPage'
 import { PageTitle } from '../components/PageTitle'
+import { SourcegraphContext } from '../jscontext'
 import { eventLogger } from '../tracking/eventLogger'
+
+import { SourcegraphIcon } from './icons'
+import { OrDivider } from './OrDivider'
 import { getReturnTo } from './SignInSignUpCommon'
 import { UsernamePasswordSignInForm } from './UsernamePasswordSignInForm'
-import { AuthenticatedUser } from '../auth'
-import { SourcegraphIcon } from './icons'
-import { partition } from 'lodash'
-import { OrDivider } from './OrDivider'
-import { ErrorAlert } from '../components/alerts'
-import classNames from 'classnames'
-import GithubIcon from 'mdi-react/GithubIcon'
-import { SourcegraphContext } from '../jscontext'
 
 interface SignInPageProps {
     location: H.Location
@@ -47,9 +49,7 @@ export const SignInPage: React.FunctionComponent<SignInPageProps> = props => {
             </div>
         ) : (
             <div className="mb-4 signin-page__container pb-5">
-                {error && (
-                    <ErrorAlert className="mt-4 mb-0 text-left" error={error} icon={false} history={props.history} />
-                )}
+                {error && <ErrorAlert className="mt-4 mb-0 text-left" error={error} icon={false} />}
                 <div
                     className={classNames(
                         'signin-signup-form signin-form test-signin-form rounded p-4 my-3',

@@ -1,22 +1,23 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import * as React from 'react'
 import { RouteComponentProps } from 'react-router'
 import { Subject, Subscription } from 'rxjs'
 import { switchMap } from 'rxjs/operators'
-import { ExternalServiceCard } from '../../components/externalServices/ExternalServiceCard'
-import { Form } from '../../../../branded/src/components/Form'
-import { PageTitle } from '../../components/PageTitle'
-import { eventLogger } from '../../tracking/eventLogger'
-import { fetchSettingsAreaRepository } from './backend'
+
+import { Form } from '@sourcegraph/branded/src/components/Form'
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { asError } from '@sourcegraph/shared/src/util/errors'
+
 import { ErrorAlert } from '../../components/alerts'
+import { ExternalServiceCard } from '../../components/externalServices/ExternalServiceCard'
 import { defaultExternalServices } from '../../components/externalServices/externalServices'
-import { asError } from '../../../../shared/src/util/errors'
-import * as H from 'history'
+import { PageTitle } from '../../components/PageTitle'
 import { SettingsAreaRepositoryFields } from '../../graphql-operations'
+import { eventLogger } from '../../tracking/eventLogger'
+
+import { fetchSettingsAreaRepository } from './backend'
 
 interface Props extends RouteComponentProps<{}> {
     repo: SettingsAreaRepositoryFields
-    history: H.History
 }
 
 interface State {
@@ -67,7 +68,7 @@ export class RepoSettingsOptionsPage extends React.PureComponent<Props, State> {
                 <PageTitle title="Repository settings" />
                 <h2>Settings</h2>
                 {this.state.loading && <LoadingSpinner className="icon-inline" />}
-                {this.state.error && <ErrorAlert error={this.state.error} history={this.props.history} />}
+                {this.state.error && <ErrorAlert error={this.state.error} />}
                 {services.length > 0 && (
                     <div className="mb-4">
                         {services.map(service => (

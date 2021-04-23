@@ -1,9 +1,12 @@
+/* eslint-disable no-template-curly-in-string */
 import * as Monaco from 'monaco-editor'
+import { NEVER, of } from 'rxjs'
+
+import { SearchSuggestion } from '../../graphql/schema'
+
 import { getCompletionItems, repositoryCompletionItemKind } from './completion'
 import { scanSearchQuery, ScanSuccess, ScanResult } from './scanner'
 import { Token } from './token'
-import { NEVER, of } from 'rxjs'
-import { SearchSuggestion } from '../../graphql/schema'
 
 const toSuccess = (result: ScanResult<Token[]>): Token[] => (result as ScanSuccess<Token[]>).term
 
@@ -46,6 +49,7 @@ describe('getCompletionItems()', () => {
             '-committer',
             'content',
             '-content',
+            'context',
             'count',
             'file',
             '-file',
@@ -63,6 +67,7 @@ describe('getCompletionItems()', () => {
             'repohasfile',
             '-repohasfile',
             'rev',
+            'select',
             'stable',
             'timeout',
             'type',
@@ -108,6 +113,7 @@ describe('getCompletionItems()', () => {
             '-committer',
             'content',
             '-content',
+            'context',
             'count',
             'file',
             '-file',
@@ -125,6 +131,7 @@ describe('getCompletionItems()', () => {
             'repohasfile',
             '-repohasfile',
             'rev',
+            'select',
             'stable',
             'timeout',
             'type',
@@ -150,6 +157,7 @@ describe('getCompletionItems()', () => {
             '-committer',
             'content',
             '-content',
+            'context',
             'count',
             'file',
             '-file',
@@ -167,6 +175,7 @@ describe('getCompletionItems()', () => {
             'repohasfile',
             '-repohasfile',
             'rev',
+            'select',
             'stable',
             'timeout',
             'type',
@@ -200,6 +209,7 @@ describe('getCompletionItems()', () => {
             '-committer',
             'content',
             '-content',
+            'context',
             'count',
             'file',
             '-file',
@@ -217,6 +227,7 @@ describe('getCompletionItems()', () => {
             'repohasfile',
             '-repohasfile',
             'rev',
+            'select',
             'stable',
             'timeout',
             'type',
@@ -241,6 +252,7 @@ describe('getCompletionItems()', () => {
             '-committer',
             'content',
             '-content',
+            'context',
             'count',
             'file',
             '-file',
@@ -258,6 +270,7 @@ describe('getCompletionItems()', () => {
             'repohasfile',
             '-repohasfile',
             'rev',
+            'select',
             'stable',
             'timeout',
             'type',
@@ -309,6 +322,21 @@ describe('getCompletionItems()', () => {
             'swift',
             'typescript',
         ])
+    })
+
+    test('returns completions in order of discrete value definition, not alphabetically', async () => {
+        expect(
+            (
+                await getCompletionItems(
+                    toSuccess(scanSearchQuery('select:')),
+                    {
+                        column: 8,
+                    },
+                    of([]),
+                    false
+                )
+            )?.suggestions.map(({ label }) => label)
+        ).toStrictEqual(['repo', 'file', 'content', 'symbol', 'commit'])
     })
 
     test('returns dynamically fetched completions', async () => {
@@ -430,5 +458,29 @@ describe('getCompletionItems()', () => {
                 )
             )?.suggestions.map(({ insertText }) => insertText)
         ).toStrictEqual(['^some/path/main\\.go$ '])
+    })
+
+    test('escapes spaces in repo value', async () => {
+        expect(
+            (
+                await getCompletionItems(
+                    toSuccess(scanSearchQuery('repo:')),
+                    { column: 5 },
+                    of([
+                        {
+                            __typename: 'Repository',
+                            name: 'repo/with a space',
+                        },
+                    ] as SearchSuggestion[]),
+                    false
+                )
+            )?.suggestions.map(({ insertText }) => insertText)
+        ).toStrictEqual([
+            'contains.file(${1:CHANGELOG}) ',
+            'contains.content(${1:TODO}) ',
+            'contains(file:${1:CHANGELOG} content:${2:fix}) ',
+            'contains.commit.after(${1:1 month ago}) ',
+            '^repo/with\\ a\\ space$ ',
+        ])
     })
 })

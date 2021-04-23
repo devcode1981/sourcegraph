@@ -1,39 +1,40 @@
-import { ensureEvent, getClient, EventOptions } from './google-calendar'
-import { postMessage } from './slack'
+import { readFileSync, rmdirSync, writeFileSync } from 'fs'
+import * as path from 'path'
+
+import commandExists from 'command-exists'
+import { addMinutes } from 'date-fns'
+
+import * as campaigns from './campaigns'
+import * as changelog from './changelog'
+import { Config, releaseVersions } from './config'
 import {
     getAuthenticatedGitHubClient,
     listIssues,
     getTrackingIssue,
-    ensureReleaseTrackingIssue,
-    ensurePatchReleaseIssue,
     createChangesets,
     CreatedChangeset,
     createTag,
+    ensureTrackingIssues,
+    releaseName,
 } from './github'
-import * as changelog from './changelog'
-import * as campaigns from './campaigns'
-import { Config, releaseVersions } from './config'
-import { cacheFolder, formatDate, timezoneLink } from './util'
-import { addMinutes, isWeekend, eachDayOfInterval, addDays, subDays } from 'date-fns'
-import { readFileSync, rmdirSync, writeFileSync } from 'fs'
-import * as path from 'path'
-import commandExists from 'command-exists'
+import { ensureEvent, getClient, EventOptions, calendarTime } from './google-calendar'
+import { postMessage, slackURL } from './slack'
+import { cacheFolder, formatDate, timezoneLink, hubSpotFeedbackFormStub } from './util'
 
 const sed = process.platform === 'linux' ? 'sed' : 'gsed'
 
 export type StepID =
     | 'help'
     // release tracking
-    | 'tracking:release-timeline'
-    | 'tracking:release-issue'
-    | 'tracking:patch-issue'
+    | 'tracking:timeline'
+    | 'tracking:issues'
     // branch cut
     | 'changelog:cut'
     // release
     | 'release:status'
     | 'release:create-candidate'
     | 'release:stage'
-    | 'release:add-to-campaign'
+    | 'release:add-to-batch-change'
     | 'release:finalize'
     | 'release:close'
     // util
@@ -97,152 +98,87 @@ const steps: Step[] = [
         },
     },
     {
-        id: 'tracking:release-timeline',
+        id: 'tracking:timeline',
         description: 'Generate a set of Google Calendar events for a MAJOR.MINOR release',
         run: async config => {
-            const googleCalendar = await getClient()
             const { upcoming: release } = await releaseVersions(config)
+            const name = releaseName(release)
             const events: EventOptions[] = [
                 {
-                    title: 'Release captain: prepare for branch cut (5 working days until release)',
-                    description: 'See the release tracking issue for TODOs',
-                    startDateTime: new Date(config.fiveWorkingDaysBeforeRelease).toISOString(),
-                    endDateTime: addMinutes(new Date(config.fiveWorkingDaysBeforeRelease), 1).toISOString(),
-                },
-                {
-                    title: 'Release captain: branch cut (4 working days until release)',
-                    description: 'See the release tracking issue for TODOs',
-                    startDateTime: new Date(config.fourWorkingDaysBeforeRelease).toISOString(),
-                    endDateTime: addMinutes(new Date(config.fourWorkingDaysBeforeRelease), 1).toISOString(),
-                },
-                ...eachDayOfInterval({
-                    start: addDays(new Date(config.fourWorkingDaysBeforeRelease), 1),
-                    end: subDays(new Date(config.oneWorkingDayBeforeRelease), 1),
-                })
-                    .filter(date => !isWeekend(date))
-                    .map(date => ({
-                        title: 'Release captain: cut new release candidate',
-                        description: 'See release tracking issue for TODOs',
-                        startDateTime: date.toISOString(),
-                        endDateTime: addMinutes(date, 1).toISOString(),
-                    })),
-                {
-                    title: 'Release captain: tag final release (1 working day before release)',
-                    description: 'See the release tracking issue for TODOs',
-                    startDateTime: new Date(config.oneWorkingDayBeforeRelease).toISOString(),
-                    endDateTime: addMinutes(new Date(config.oneWorkingDayBeforeRelease), 1).toISOString(),
-                },
-                {
-                    title: `Cut release branch ${release.major}.${release.minor}`,
+                    title: `Cut and release Sourcegraph ${name}`,
                     description: '(This is not an actual event to attend, just a calendar marker.)',
                     anyoneCanAddSelf: true,
                     attendees: [config.teamEmail],
-                    startDateTime: new Date(config.fourWorkingDaysBeforeRelease).toISOString(),
-                    endDateTime: addMinutes(new Date(config.fourWorkingDaysBeforeRelease), 1).toISOString(),
+                    transparency: 'transparent',
+                    ...calendarTime(config.releaseDate),
                 },
                 {
-                    title: `Release Sourcegraph ${release.major}.${release.minor}`,
+                    title: `Deploy Sourcegraph ${name} to managed instances`,
                     description: '(This is not an actual event to attend, just a calendar marker.)',
                     anyoneCanAddSelf: true,
                     attendees: [config.teamEmail],
-                    startDateTime: new Date(config.releaseDateTime).toISOString(),
-                    endDateTime: addMinutes(new Date(config.releaseDateTime), 1).toISOString(),
+                    transparency: 'transparent',
+                    ...calendarTime(config.oneWorkingDayAfterRelease),
                 },
             ]
 
-            for (const event of events) {
-                console.log(`Create calendar event: ${event.title}: ${event.startDateTime || 'undefined'}`)
-                await ensureEvent(event, googleCalendar)
+            if (!config.dryRun.calendar) {
+                const googleCalendar = await getClient()
+                for (const event of events) {
+                    console.log(`Create calendar event: ${event.title}: ${event.startDateTime || 'undefined'}`)
+                    await ensureEvent(event, googleCalendar)
+                }
+            } else {
+                console.log('dryRun.calendar=true, skipping calendar event creation', events)
             }
         },
     },
     {
-        id: 'tracking:release-issue',
-        description: 'Generate a GitHub tracking issue for a MAJOR.MINOR release',
+        id: 'tracking:issues',
+        description: 'Generate GitHub tracking issue for the configured release',
         run: async (config: Config) => {
             const {
-                releaseDateTime,
+                releaseDate,
                 captainGitHubUsername,
-                oneWorkingDayBeforeRelease,
-                fourWorkingDaysBeforeRelease,
-                fiveWorkingDaysBeforeRelease,
-
+                oneWorkingDayAfterRelease,
                 captainSlackUsername,
                 slackAnnounceChannel,
                 dryRun,
             } = config
             const { upcoming: release } = await releaseVersions(config)
+            const date = new Date(releaseDate)
 
             // Create issue
-            const { url, created } = await ensureReleaseTrackingIssue({
+            const trackingIssues = await ensureTrackingIssues({
                 version: release,
                 assignees: [captainGitHubUsername],
-                releaseDateTime: new Date(releaseDateTime),
-                oneWorkingDayBeforeRelease: new Date(oneWorkingDayBeforeRelease),
-                fourWorkingDaysBeforeRelease: new Date(fourWorkingDaysBeforeRelease),
-                fiveWorkingDaysBeforeRelease: new Date(fiveWorkingDaysBeforeRelease),
+                releaseDate: date,
+                oneWorkingDayAfterRelease: new Date(oneWorkingDayAfterRelease),
                 dryRun: dryRun.trackingIssues || false,
             })
-            if (url) {
-                console.log(created ? `Created tracking issue ${url}` : `Tracking issue already exists: ${url}`)
-            }
+            console.log('Rendered tracking issues', trackingIssues)
 
-            // Announce issue if issue does not already exist
-            if (created) {
-                // Slack markdown links
-                const majorMinor = `${release.major}.${release.minor}`
-                const branchCutDate = new Date(fourWorkingDaysBeforeRelease)
-                const branchCutDateString = `<${timezoneLink(branchCutDate, `${majorMinor} branch cut`)}|${formatDate(
-                    branchCutDate
-                )}>`
-                const releaseDate = new Date(releaseDateTime)
-                const releaseDateString = `<${timezoneLink(releaseDate, `${majorMinor} release`)}|${formatDate(
-                    releaseDate
-                )}>`
-                await postMessage(
-                    `:mega: *${majorMinor} Release*
+            // If at least one issue was created, post to Slack
+            if (trackingIssues.find(({ created }) => created)) {
+                const name = releaseName(release)
+                const releaseDateString = slackURL(formatDate(date), timezoneLink(date, `${name} release`))
+                let annoncement = `:mega: *${name} release*
 
 :captain: Release captain: @${captainSlackUsername}
-:pencil: Tracking issue: ${url}
-:spiral_calendar_pad: Key dates:
-* Branch cut: ${branchCutDateString}
-* Release: ${releaseDateString}`,
-                    slackAnnounceChannel
-                )
+:spiral_calendar_pad: Scheduled for: ${releaseDateString}
+:pencil: Tracking issues:
+${trackingIssues.map(index => `- ${slackURL(index.title, index.url)}`).join('\n')}`
+                if (release.patch !== 0) {
+                    const patchRequestTemplate = `https://github.com/sourcegraph/sourcegraph/issues/new?assignees=&labels=team%2Fdistribution&template=request_patch_release.md&title=${release.version}%3A+`
+                    annoncement += `\n\nIf you have changes that should go into this patch release, ${slackURL(
+                        'please *file a patch request issue*',
+                        patchRequestTemplate
+                    )}, or it will not be included.`
+                }
+                await postMessage(annoncement, slackAnnounceChannel)
                 console.log(`Posted to Slack channel ${slackAnnounceChannel}`)
-            }
-        },
-    },
-    {
-        id: 'tracking:patch-issue',
-        description: 'Generate a GitHub tracking issue for a MAJOR.MINOR.PATCH release',
-        run: async config => {
-            const { captainGitHubUsername, captainSlackUsername, slackAnnounceChannel, dryRun } = config
-            const { upcoming: release } = await releaseVersions(config)
-
-            // Create issue
-            const { url, created } = await ensurePatchReleaseIssue({
-                version: release,
-                assignees: [captainGitHubUsername],
-                dryRun: dryRun.trackingIssues || false,
-            })
-            if (url) {
-                console.log(created ? `Created tracking issue ${url}` : `Tracking issue already exists: ${url}`)
-            }
-
-            // Announce issue if issue does not already exist
-            if (created) {
-                const patchRequestTemplate = `https://github.com/sourcegraph/sourcegraph/issues/new?assignees=&labels=team%2Fdistribution&template=request_patch_release.md&title=${release.version}%3A+`
-                await postMessage(
-                    `:mega: *${release.version} Patch Release*
-
-:captain: Release captain: @${captainSlackUsername}
-:pencil: Tracking issue: ${url}
-
-If you have changes that should go into this patch release, <${patchRequestTemplate}|please *file a patch request issue*>, or it will not be included.`,
-                    slackAnnounceChannel
-                )
-                console.log(`Posted to Slack channel ${slackAnnounceChannel}`)
+            } else {
+                console.log('No tracking issues were created, skipping Slack announcement')
             }
         },
     },
@@ -384,12 +320,26 @@ ${customMessage || ''}
 
 ### :warning: Additional changes required
 
+These steps must be completed before this PR can be merged, unless otherwise stated. Push any required changes directly to this PR branch.
+
 ${actionItems.map(item => `- [ ] ${item}`).join('\n')}
 
 cc @${config.captainGitHubUsername}
 `,
                 }
             }
+
+            const [previousVersion, nextVersion] = [
+                `${previous.major}.${previous.minor}`,
+                `${release.major}.${release.minor}`,
+            ]
+
+            // we join with escaped newlines for the 'sed' command
+            const upgradeGuideEntry = [
+                `## ${previousVersion} -> ${nextVersion}`,
+                'TODO',
+                hubSpotFeedbackFormStub(previousVersion),
+            ].join('\\n\\n')
 
             // Render changes
             const createdChanges = await createChangesets({
@@ -408,7 +358,12 @@ cc @${config.captainGitHubUsername}
                             // Update references to Sourcegraph versions in docs
                             `find . -type f -name '*.md' ! -name 'CHANGELOG.md' -exec ${sed} -i -E 's/sourcegraph\\/server:${versionRegex}/sourcegraph\\/server:${release.version}/g' {} +`,
                             `${sed} -i -E 's/version \`${versionRegex}\`/version \`${release.version}\`/g' doc/index.md`,
+                            `${sed} -i -E 's/SOURCEGRAPH_VERSION="v${versionRegex}"/SOURCEGRAPH_VERSION="v${release.version}"/g' doc/admin/install/kubernetes/index.md`,
                             `${sed} -i -E 's/SOURCEGRAPH_VERSION="v${versionRegex}"/SOURCEGRAPH_VERSION="v${release.version}"/g' doc/admin/install/docker-compose/index.md`,
+                            `${sed} -i -E "s/DEPLOY_SOURCEGRAPH_DOCKER_FORK_REVISION='v${versionRegex}'/DEPLOY_SOURCEGRAPH_DOCKER_FORK_REVISION='v${release.version}'/g" doc/admin/install/docker-compose/aws.md`,
+                            `${sed} -i -E "s/DEPLOY_SOURCEGRAPH_DOCKER_FORK_REVISION='v${versionRegex}'/DEPLOY_SOURCEGRAPH_DOCKER_FORK_REVISION='v${release.version}'/g" doc/admin/install/docker-compose/digitalocean.md`,
+                            `${sed} -i -E "s/DEPLOY_SOURCEGRAPH_DOCKER_FORK_REVISION='v${versionRegex}'/DEPLOY_SOURCEGRAPH_DOCKER_FORK_REVISION='v${release.version}'/g" doc/admin/install/docker-compose/google_cloud.md`,
+
                             notPatchRelease
                                 ? `comby -in-place '{{$previousReleaseRevspec := ":[1]"}} {{$previousReleaseVersion := ":[2]"}} {{$currentReleaseRevspec := ":[3]"}} {{$currentReleaseVersion := ":[4]"}}' '{{$previousReleaseRevspec := ":[3]"}} {{$previousReleaseVersion := ":[4]"}} {{$currentReleaseRevspec := "v${release.version}"}} {{$currentReleaseVersion := "${release.major}.${release.minor}"}}' doc/_resources/templates/document.html`
                                 : `comby -in-place 'currentReleaseRevspec := ":[1]"' 'currentReleaseRevspec := "v${release.version}"' doc/_resources/templates/document.html`,
@@ -418,9 +373,12 @@ cc @${config.captainGitHubUsername}
                             `comby -in-place 'latestReleaseDockerServerImageBuild = newBuild(":[1]")' "latestReleaseDockerServerImageBuild = newBuild(\\"${release.version}\\")" cmd/frontend/internal/app/updatecheck/handler.go`,
                             `comby -in-place 'latestReleaseDockerComposeOrPureDocker = newBuild(":[1]")' "latestReleaseDockerComposeOrPureDocker = newBuild(\\"${release.version}\\")" cmd/frontend/internal/app/updatecheck/handler.go`,
 
+                            // Support current release as the "previous release" going forward
+                            `comby -in-place 'env["MINIMUM_UPGRADEABLE_VERSION"] = ":[1]"' 'env["MINIMUM_UPGRADEABLE_VERSION"] = "${release.version}"' enterprise/dev/ci/internal/ci/*.go`,
+
                             // Add a stub to add upgrade guide entries
                             notPatchRelease
-                                ? `${sed} -i -E '/GENERATE UPGRADE GUIDE ON RELEASE/a \\\n\\n## ${previous.major}.${previous.minor} -> ${release.major}.${release.minor}\\n\\nTODO' doc/admin/updates/*.md`
+                                ? `${sed} -i -E '/GENERATE UPGRADE GUIDE ON RELEASE/a \\\n\\n${upgradeGuideEntry}' doc/admin/updates/*.md`
                                 : 'echo "Skipping upgrade guide entries"',
                         ],
                         ...prBodyAndDraftState(
@@ -530,10 +488,10 @@ Campaign: ${campaignURL}`,
         },
     },
     {
-        id: 'release:add-to-campaign',
-        description: 'Manually add a change to a release campaign',
+        id: 'release:add-to-batch-change',
+        description: 'Manually add a change to a release batch change',
         argNames: ['changeRepo', 'changeID'],
-        // Example: yarn run release release:add-to-campaign sourcegraph/about 1797
+        // Example: yarn run release release:add-to-batch-change sourcegraph/about 1797
         run: async (config, changeRepo, changeID) => {
             const { upcoming: release } = await releaseVersions(config)
             if (!changeRepo || !changeID) {
@@ -558,21 +516,32 @@ Campaign: ${campaignURL}`,
         description: 'Run final tasks for the sourcegraph/sourcegraph release pull request',
         run: async config => {
             const { upcoming: release } = await releaseVersions(config)
+            let failed = false
 
             // Push final tags
             const branch = `${release.major}.${release.minor}`
             const tag = `v${release.version}`
             for (const repo of ['deploy-sourcegraph', 'deploy-sourcegraph-docker']) {
-                await createTag(
-                    await getAuthenticatedGitHubClient(),
-                    {
-                        owner: 'sourcegraph',
-                        repo,
-                        branch,
-                        tag,
-                    },
-                    config.dryRun.tags || false
-                )
+                try {
+                    await createTag(
+                        await getAuthenticatedGitHubClient(),
+                        {
+                            owner: 'sourcegraph',
+                            repo,
+                            branch,
+                            tag,
+                        },
+                        config.dryRun.tags || false
+                    )
+                } catch (error) {
+                    console.error(error)
+                    console.error(`Failed to create tag ${tag} on ${repo}@${branch}`)
+                    failed = true
+                }
+            }
+
+            if (failed) {
+                throw new Error('Error occured applying some changes - please check log output')
             }
         },
     },
@@ -585,7 +554,7 @@ Campaign: ${campaignURL}`,
             const githubClient = await getAuthenticatedGitHubClient()
 
             // Set up announcement message
-            const versionAnchor = release.format().replaceAll('.', '-')
+            const versionAnchor = release.format().replace(/\./g, '-')
             const campaignURL = campaigns.campaignURL(
                 campaigns.releaseTrackingCampaign(release.version, await campaigns.sourcegraphCLIConfig())
             )
@@ -629,8 +598,9 @@ Campaign: ${campaignURL}`,
             await ensureEvent(
                 {
                     title: 'TEST EVENT',
-                    startDateTime: new Date(config.releaseDateTime).toISOString(),
-                    endDateTime: addMinutes(new Date(config.releaseDateTime), 1).toISOString(),
+                    startDateTime: new Date(config.releaseDate).toISOString(),
+                    endDateTime: addMinutes(new Date(config.releaseDate), 1).toISOString(),
+                    transparency: 'transparent',
                 },
                 googleCalendar
             )

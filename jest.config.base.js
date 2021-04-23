@@ -44,6 +44,7 @@ const config = {
     // https://github.com/Microsoft/monaco-editor/issues/996
     '^monaco-editor': 'monaco-editor/esm/vs/editor/editor.main.js',
   },
+  modulePaths: ['node_modules', '<rootDir>/src'],
 
   // By default, don't clutter `yarn test --watch` output with the full coverage table. To see it, use the
   // `--coverageReporters text` jest option.
@@ -59,7 +60,11 @@ const config = {
     // Enzyme setup file
     path.join(__dirname, 'client/shared/dev/enzymeSetup.js'),
   ],
-  setupFilesAfterEnv: [require.resolve('core-js/stable'), require.resolve('regenerator-runtime/runtime')],
+  setupFilesAfterEnv: [
+    require.resolve('core-js/stable'),
+    require.resolve('regenerator-runtime/runtime'),
+    require.resolve('@testing-library/jest-dom'),
+  ],
   globalSetup: path.join(__dirname, 'client/shared/dev/jestGlobalSetup.js'),
   snapshotSerializers: [path.join(__dirname, 'client/shared/dev/enzymeSerializer.js')],
 }

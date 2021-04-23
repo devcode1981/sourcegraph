@@ -1,14 +1,18 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import * as H from 'history'
 import MapSearchIcon from 'mdi-react/MapSearchIcon'
 import * as React from 'react'
 import { Route, RouteComponentProps, Switch } from 'react-router'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { HeroPage } from '../../components/HeroPage'
 import { SettingsArea } from '../../settings/SettingsArea'
 import { SiteAdminAlert } from '../../site-admin/SiteAdminAlert'
-import { ThemeProps } from '../../../../shared/src/theme'
 import { OrgAreaPageProps } from '../area/OrgArea'
+
+import { OrgSettingsMembersPage } from './members/OrgSettingsMembersPage'
 import { OrgSettingsSidebar } from './OrgSettingsSidebar'
 import { OrgSettingsProfilePage } from './profile/OrgSettingsProfilePage'
 
@@ -73,6 +77,14 @@ export const OrgSettingsArea: React.FunctionComponent<Props> = props => {
                                 exact={true}
                                 render={routeComponentProps => (
                                     <OrgSettingsProfilePage {...routeComponentProps} {...props} />
+                                )}
+                            />
+                            <Route
+                                path={`${props.match.path}/members`}
+                                key="hardcoded-key" // see https://github.com/ReactTraining/react-router/issues/4578#issuecomment-334489490
+                                exact={true}
+                                render={routeComponentProps => (
+                                    <OrgSettingsMembersPage {...routeComponentProps} {...props} />
                                 )}
                             />
                             <Route component={NotFoundPage} />

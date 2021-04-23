@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,7 +21,7 @@ func TestHorizontalSearcher(t *testing.T) {
 
 	searcher := &HorizontalSearcher{
 		Map: &endpoints,
-		Dial: func(endpoint string) zoekt.Searcher {
+		Dial: func(endpoint string) zoekt.Streamer {
 			var rle zoekt.RepoListEntry
 			rle.Repository.Name = endpoint
 			client := &mockSearcher{
@@ -28,12 +29,11 @@ func TestHorizontalSearcher(t *testing.T) {
 					Files: []zoekt.FileMatch{{
 						Repository: endpoint,
 					}},
-					RepoURLs: map[string]string{endpoint: endpoint},
 				},
 				listResult: &zoekt.RepoList{Repos: []*zoekt.RepoListEntry{&rle}},
 			}
 			// Return metered searcher to test that codepath
-			return NewMeteredSearcher(endpoint, client)
+			return NewMeteredSearcher(endpoint, &StreamSearchAdapter{client})
 		},
 	}
 	defer searcher.Close()
@@ -86,16 +86,6 @@ func TestHorizontalSearcher(t *testing.T) {
 			t.Errorf("search mismatch (-want +got):\n%s", cmp.Diff(want, got))
 		}
 
-		// repohasfile depends on RepoURLs aggregating
-		got = got[:0]
-		for repo := range sr.RepoURLs {
-			got = append(got, repo)
-		}
-		sort.Strings(got)
-		if !cmp.Equal(want, got, cmpopts.EquateEmpty()) {
-			t.Errorf("search mismatch (-want +got):\n%s", cmp.Diff(want, got))
-		}
-
 		// Our list results should be one per server
 		rle, err := searcher.List(context.Background(), nil)
 		if err != nil {
@@ -114,6 +104,36 @@ func TestHorizontalSearcher(t *testing.T) {
 	searcher.Close()
 }
 
+func TestDoStreamSearch(t *testing.T) {
+	var endpoints atomicMap
+	endpoints.Store(prefixMap{"1"})
+
+	searcher := &HorizontalSearcher{
+		Map: &endpoints,
+		Dial: func(endpoint string) zoekt.Streamer {
+			client := &mockSearcher{
+				searchResult: nil,
+				searchError:  fmt.Errorf("test error"),
+			}
+			// Return metered searcher to test that codepath
+			return NewMeteredSearcher(endpoint, &StreamSearchAdapter{client})
+		},
+	}
+	defer searcher.Close()
+
+	c := make(chan *zoekt.SearchResult)
+	defer close(c)
+	err := searcher.StreamSearch(
+		context.Background(),
+		nil,
+		nil,
+		ZoektStreamFunc(func(event *zoekt.SearchResult) { c <- event }),
+	)
+	if err == nil {
+		t.Fatalf("received non-nil error, but expected an error")
+	}
+}
+
 func TestSyncSearchers(t *testing.T) {
 	// This test exists to ensure we test the slow path for
 	// HorizontalSearcher.searchers. The slow-path is
@@ -130,7 +150,7 @@ func TestSyncSearchers(t *testing.T) {
 	dialNumCounter := 0
 	searcher := &HorizontalSearcher{
 		Map: &endpoints,
-		Dial: func(endpoint string) zoekt.Searcher {
+		Dial: func(endpoint string) zoekt.Streamer {
 			dialNumCounter++
 			return &mock{
 				dialNum: dialNumCounter,
@@ -179,36 +199,44 @@ func TestDedupper(t *testing.T) {
 	}{{
 		name: "empty",
 		matches: []string{
-			"",
+			"zoekt-0 ",
 		},
 		want: "",
 	}, {
 		name: "one",
 		matches: []string{
-			"r1:a r1:a r1:b r2:a",
+			"zoekt-0 r1:a r1:a r1:b r2:a",
 		},
 		want: "r1:a r1:a r1:b r2:a",
 	}, {
 		name: "some dups",
 		matches: []string{
-			"r1:a r1:a r1:b r2:a",
-			"r1:c r1:c r3:a",
+			"zoekt-0 r1:a r1:a r1:b r2:a",
+			"zoekt-1 r1:c r1:c r3:a",
 		},
 		want: "r1:a r1:a r1:b r2:a r3:a",
 	}, {
 		name: "no dups",
 		matches: []string{
-			"r1:a r1:a r1:b r2:a",
-			"r4:c r4:c r5:a",
+			"zoekt-0 r1:a r1:a r1:b r2:a",
+			"zoekt-1 r4:c r4:c r5:a",
 		},
 		want: "r1:a r1:a r1:b r2:a r4:c r4:c r5:a",
 	}, {
 		name: "shuffled",
 		matches: []string{
-			"r1:a r2:a r1:a r1:b",
-			"r1:c r3:a r1:c",
+			"zoekt-0 r1:a r2:a r1:a r1:b",
+			"zoekt-1 r1:c r3:a r1:c",
 		},
 		want: "r1:a r2:a r1:a r1:b r3:a",
+	}, {
+		name: "some dups multi event",
+		matches: []string{
+			"zoekt-0 r1:a r1:a",
+			"zoekt-1 r1:c r1:c r3:a",
+			"zoekt-0 r1:b r2:a",
+		},
+		want: "r1:a r1:a r3:a r1:b r2:a",
 	}}
 
 	for _, tc := range cases {
@@ -216,8 +244,10 @@ func TestDedupper(t *testing.T) {
 			d := dedupper{}
 			var got []zoekt.FileMatch
 			for _, s := range tc.matches {
-				fms := parse(s)
-				got = append(got, d.Dedup(fms)...)
+				parts := strings.SplitN(s, " ", 2)
+				endpoint := parts[0]
+				fms := parse(parts[1])
+				got = append(got, d.Dedup(endpoint, fms)...)
 			}
 
 			want := parse(tc.want)
@@ -261,8 +291,8 @@ func BenchmarkDedup(b *testing.B) {
 		b.StartTimer()
 
 		d := dedupper{}
-		for _, shard := range shards {
-			_ = d.Dedup(shard)
+		for clientID, shard := range shards {
+			_ = d.Dedup(strconv.Itoa(clientID), shard)
 		}
 	}
 }
@@ -317,6 +347,10 @@ func (s *mockSearcher) Search(context.Context, query.Q, *zoekt.SearchOptions) (*
 		res = &sr
 	}
 	return res, s.searchError
+}
+
+func (s *mockSearcher) StreamSearch(ctx context.Context, q query.Q, opts *zoekt.SearchOptions, streamer zoekt.Sender) error {
+	return (&StreamSearchAdapter{s}).StreamSearch(ctx, q, opts, streamer)
 }
 
 func (s *mockSearcher) List(context.Context, query.Q) (*zoekt.RepoList, error) {

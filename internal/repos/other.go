@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+
 	"github.com/sourcegraph/sourcegraph/internal/api"
 	"github.com/sourcegraph/sourcegraph/internal/conf/reposource"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc"
@@ -141,6 +142,9 @@ func (s OtherSource) otherRepoFromCloneURL(urn string, u *url.URL) (*types.Repo,
 				CloneURL: repoURL,
 			},
 		},
+		Metadata: &types.OtherRepoMetadata{
+			RelativePath: strings.TrimPrefix(repoURL, serviceID),
+		},
 	}, nil
 }
 
@@ -154,6 +158,7 @@ func (s OtherSource) srcExpose(ctx context.Context) ([]*types.Repo, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	b, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
@@ -186,14 +191,16 @@ func (s OtherSource) srcExpose(ctx context.Context) ([]*types.Repo, error) {
 			ServiceType: extsvc.TypeOther,
 			ServiceID:   s.conn.Url,
 		}
+		cloneURL := clonePrefix + strings.TrimPrefix(r.URI, "/") + "/.git"
 		r.Sources = map[string]*types.SourceInfo{
 			urn: {
-				ID: urn,
-				// TODO we should allow this to be set
-				CloneURL: clonePrefix + strings.TrimPrefix(r.URI, "/") + "/.git",
+				ID:       urn,
+				CloneURL: cloneURL,
 			},
 		}
-
+		r.Metadata = &types.OtherRepoMetadata{
+			RelativePath: strings.TrimPrefix(cloneURL, s.conn.Url),
+		}
 		// The only required field left is Name
 		if r.Name == "" {
 			r.Name = api.RepoName(r.URI)

@@ -1,32 +1,30 @@
 import React, { FunctionComponent, useEffect, useState, useCallback } from 'react'
-import { RouteComponentProps } from 'react-router'
+
 import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
-import * as H from 'history'
+import { gql, dataOrThrowErrors } from '@sourcegraph/shared/src/graphql/graphql'
+import { asError, ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
 
 import { requestGraphQL } from '../../../backend/graphql'
-import { UserAreaUserFields, UserEmailsResult, UserEmailsVariables } from '../../../graphql-operations'
-import { gql, dataOrThrowErrors } from '../../../../../shared/src/graphql/graphql'
-import { useObservable } from '../../../../../shared/src/util/useObservable'
-import { siteFlags } from '../../../site/backend'
-import { asError, ErrorLike, isErrorLike } from '../../../../../shared/src/util/errors'
-import { eventLogger } from '../../../tracking/eventLogger'
-
 import { ErrorAlert } from '../../../components/alerts'
 import { PageTitle } from '../../../components/PageTitle'
-import { UserEmail } from './UserEmail'
+import { UserAreaUserFields, UserEmailsResult, UserEmailsVariables } from '../../../graphql-operations'
+import { siteFlags } from '../../../site/backend'
+import { eventLogger } from '../../../tracking/eventLogger'
+
 import { AddUserEmailForm } from './AddUserEmailForm'
 import { SetUserPrimaryEmailForm } from './SetUserPrimaryEmailForm'
+import { UserEmail } from './UserEmail'
 
-interface Props extends RouteComponentProps<{}> {
+interface Props {
     user: UserAreaUserFields
-    history: H.History
 }
 
 type UserEmail = NonNullable<UserEmailsResult['node']>['emails'][number]
 type Status = undefined | 'loading' | 'loaded' | ErrorLike
 type EmailActionError = undefined | ErrorLike
 
-export const UserSettingsEmailsPage: FunctionComponent<Props> = ({ user, history }) => {
+export const UserSettingsEmailsPage: FunctionComponent<Props> = ({ user }) => {
     const [emails, setEmails] = useState<UserEmail[]>([])
     const [statusOrError, setStatusOrError] = useState<Status>()
     const [emailActionError, setEmailActionError] = useState<EmailActionError>()
@@ -98,10 +96,8 @@ export const UserSettingsEmailsPage: FunctionComponent<Props> = ({ user, history
                 </div>
             )}
 
-            {isErrorLike(statusOrError) && <ErrorAlert className="mt-2" error={statusOrError} history={history} />}
-            {isErrorLike(emailActionError) && (
-                <ErrorAlert className="mt-2" error={emailActionError} history={history} />
-            )}
+            {isErrorLike(statusOrError) && <ErrorAlert className="mt-2" error={statusOrError} />}
+            {isErrorLike(emailActionError) && <ErrorAlert className="mt-2" error={emailActionError} />}
 
             <h2>Emails</h2>
 
@@ -129,10 +125,10 @@ export const UserSettingsEmailsPage: FunctionComponent<Props> = ({ user, history
             )}
 
             {/* re-fetch emails on onDidAdd to guarantee correct state */}
-            <AddUserEmailForm className="mt-4" user={user.id} onDidAdd={fetchEmails} history={history} />
+            <AddUserEmailForm className="mt-4" user={user.id} onDidAdd={fetchEmails} />
             <hr className="my-4" />
             {statusOrError === 'loaded' && (
-                <SetUserPrimaryEmailForm user={user.id} emails={emails} onDidSet={fetchEmails} history={history} />
+                <SetUserPrimaryEmailForm user={user.id} emails={emails} onDidSet={fetchEmails} />
             )}
         </div>
     )

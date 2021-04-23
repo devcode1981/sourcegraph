@@ -1,32 +1,37 @@
+import classNames from 'classnames'
+import cookies from 'js-cookie'
+import GithubIcon from 'mdi-react/GithubIcon'
+import GitlabIcon from 'mdi-react/GitlabIcon'
 import HelpCircleOutlineIcon from 'mdi-react/HelpCircleOutlineIcon'
 import React, { useCallback, useMemo, useState } from 'react'
-import { asError } from '../../../shared/src/util/errors'
-import { eventLogger } from '../tracking/eventLogger'
-import { enterpriseTrial, signupTerms } from '../util/features'
-import { EmailInput, PasswordInput, UsernameInput } from './SignInSignUpCommon'
-import { ErrorAlert } from '../components/alerts'
-import classNames from 'classnames'
-import * as H from 'history'
-import { OrDivider } from './OrDivider'
-import GithubIcon from 'mdi-react/GithubIcon'
 import { Observable, of } from 'rxjs'
-import { catchError, switchMap } from 'rxjs/operators'
 import { fromFetch } from 'rxjs/fetch'
-import GitlabIcon from 'mdi-react/GitlabIcon'
-import { LoaderButton } from '../components/LoaderButton'
-import { LoaderInput } from '../../../branded/src/components/LoaderInput'
+import { catchError, switchMap } from 'rxjs/operators'
+
+import { LoaderInput } from '@sourcegraph/branded/src/components/LoaderInput'
+import { asError } from '@sourcegraph/shared/src/util/errors'
 import {
     useInputValidation,
     ValidationOptions,
     deriveInputClassName,
-} from '../../../shared/src/util/useInputValidation'
+} from '@sourcegraph/shared/src/util/useInputValidation'
+
+import { ErrorAlert } from '../components/alerts'
+import { LoaderButton } from '../components/LoaderButton'
 import { SourcegraphContext } from '../jscontext'
+import { ANONYMOUS_USER_ID_KEY, eventLogger, FIRST_SOURCE_URL_KEY } from '../tracking/eventLogger'
+import { enterpriseTrial, signupTerms } from '../util/features'
+
+import { OrDivider } from './OrDivider'
+import { EmailInput, PasswordInput, UsernameInput } from './SignInSignUpCommon'
 
 export interface SignUpArguments {
     email: string
     username: string
     password: string
     requestedTrial: boolean
+    anonymousUserId?: string
+    firstSourceUrl?: string
 }
 
 interface SignUpFormProps {
@@ -36,7 +41,6 @@ interface SignUpFormProps {
     doSignUp: (args: SignUpArguments) => Promise<void>
 
     buttonLabel?: string
-    history: H.History
     context: Pick<SourcegraphContext, 'authProviders' | 'sourcegraphDotComMode'>
 }
 
@@ -45,13 +49,7 @@ const preventDefault = (event: React.FormEvent): void => event.preventDefault()
 /**
  * The form for creating an account
  */
-export const SignUpForm: React.FunctionComponent<SignUpFormProps> = ({
-    doSignUp,
-    history,
-    buttonLabel,
-    className,
-    context,
-}) => {
+export const SignUpForm: React.FunctionComponent<SignUpFormProps> = ({ doSignUp, buttonLabel, className, context }) => {
     const [loading, setLoading] = useState(false)
     const [requestedTrial, setRequestedTrial] = useState(false)
     const [error, setError] = useState<Error | null>(null)
@@ -100,6 +98,8 @@ export const SignUpForm: React.FunctionComponent<SignUpFormProps> = ({
                 username: usernameState.value,
                 password: passwordState.value,
                 requestedTrial,
+                anonymousUserId: cookies.get(ANONYMOUS_USER_ID_KEY),
+                firstSourceUrl: cookies.get(FIRST_SOURCE_URL_KEY),
             }).catch(error => {
                 setError(asError(error))
                 setLoading(false)
@@ -115,9 +115,17 @@ export const SignUpForm: React.FunctionComponent<SignUpFormProps> = ({
 
     const externalAuthProviders = context.authProviders.filter(provider => !provider.isBuiltin)
 
+    const onClickExternalAuthSignup = useCallback(
+        (serviceType: string): React.MouseEventHandler<HTMLAnchorElement> => () => {
+            // TODO: Log events with keepalive=true to ensure they always outlive the webpage
+            // https://github.com/sourcegraph/sourcegraph/issues/19174
+            eventLogger.log('externalAuthSignupClicked', { type: serviceType })
+        },
+        []
+    )
     return (
         <>
-            {error && <ErrorAlert className="mt-4 mb-0" error={error} history={history} />}
+            {error && <ErrorAlert className="mt-4 mb-0" error={error} />}
             {/* Using  <form /> to set 'valid' + 'is-invaild' at the input level */}
             {/* eslint-disable-next-line react/forbid-elements */}
             <form
@@ -256,9 +264,12 @@ export const SignUpForm: React.FunctionComponent<SignUpFormProps> = ({
                         {externalAuthProviders.map((provider, index) => (
                             // Use index as key because display name may not be unique. This is OK
                             // here because this list will not be updated during this component's lifetime.
-                            /* eslint-disable react/no-array-index-key */
                             <div className="mb-2" key={index}>
-                                <a href={provider.authenticationURL} className="btn btn-secondary btn-block">
+                                <a
+                                    href={provider.authenticationURL}
+                                    className="btn btn-secondary btn-block"
+                                    onClick={onClickExternalAuthSignup(provider.serviceType)}
+                                >
                                     {provider.serviceType === 'github' ? (
                                         <GithubIcon className="icon-inline" />
                                     ) : provider.serviceType === 'gitlab' ? (

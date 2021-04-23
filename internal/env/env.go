@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/inconshreveable/log15"
 )
@@ -54,11 +55,24 @@ var (
 func findName() (string, string) {
 	// Environment variable names can't contain, for instance, hyphens.
 	origName := filepath.Base(os.Args[0])
-	name := strings.Replace(origName, "-", "_", -1)
+	name := strings.ReplaceAll(origName, "-", "_")
 	if name == "" {
 		name = "unknown"
 	}
 	return origName, name
+}
+
+// Ensure behaves like Get except that it sets the environment variable if it doesn't exist.
+func Ensure(name, defaultValue, description string) string {
+	value := Get(name, defaultValue, description)
+	if value == defaultValue {
+		err := os.Setenv(name, value)
+		if err != nil {
+			panic(fmt.Sprintf("failed to set %s environment variable: %v", name, err))
+		}
+	}
+
+	return value
 }
 
 func init() {
@@ -89,7 +103,7 @@ func Get(name, defaultValue, description string) string {
 	}
 
 	// os.LookupEnv is a syscall. We use Get a lot on startup in many
-	// packages. This leads to it being the main contributer to init being
+	// packages. This leads to it being the main contributor to init being
 	// slow. So we avoid the constant syscalls by checking env once.
 	if environ == nil {
 		environ = environMap(os.Environ())
@@ -113,6 +127,26 @@ func Get(name, defaultValue, description string) string {
 	})
 
 	return value
+}
+
+// MustGetDuration is similar to Get but ensures that the value is a valid time.Duration.
+func MustGetDuration(name string, defaultValue time.Duration, description string) time.Duration {
+	s := Get(name, defaultValue.String(), description)
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		panic(fmt.Sprintf("parsing environment variable %q. Expected valid time.Duration, got %q", name, s))
+	}
+	return d
+}
+
+// MustGetInt is similar to Get but ensures that the value is a valid int.
+func MustGetInt(name string, defaultValue int, description string) int {
+	s := Get(name, strconv.Itoa(defaultValue), description)
+	i, err := strconv.Atoi(s)
+	if err != nil {
+		panic(fmt.Sprintf("parsing environment variable %q. Expected valid integer, got %q", name, s))
+	}
+	return i
 }
 
 func environMap(environ []string) map[string]string {

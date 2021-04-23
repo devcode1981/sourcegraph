@@ -401,6 +401,109 @@ loop:
 	return string(result), count, balanced == 0
 }
 
+// ScanPredicate scans for a predicate that exists in the predicate
+// registry. It takes the current field as context.
+func ScanPredicate(field string, buf []byte) (string, int, bool) {
+	fieldRegistry, ok := DefaultPredicateRegistry[field]
+	if !ok {
+		// This field has no registered predicates
+		return "", 0, false
+	}
+
+	predicateName, nameAdvance, ok := ScanPredicateName(fieldRegistry, buf)
+	if !ok {
+		return "", 0, false
+	}
+	buf = buf[nameAdvance:]
+
+	// If the predicate name isn't followed by a parenthesis, this
+	// isn't a predicate
+	if len(buf) == 0 || buf[0] != '(' {
+		return "", 0, false
+	}
+
+	params, paramsAdvance, ok := ScanBalancedParens(buf)
+	if !ok {
+		return "", 0, false
+	}
+
+	return predicateName + params, nameAdvance + paramsAdvance, true
+}
+
+// ScanPredicateName scans for a well-known predicate name for he given field
+func ScanPredicateName(fieldRegistry map[string]func() Predicate, buf []byte) (string, int, bool) {
+	var predicateName string
+	var advance int
+	for {
+		r, i := utf8.DecodeRune(buf[advance:])
+		if r == utf8.RuneError {
+			break
+		}
+
+		if !(unicode.IsLetter(r) || r == '.') {
+			predicateName = string(buf[:advance])
+			break
+		}
+		advance += i
+	}
+
+	if _, ok := fieldRegistry[predicateName]; !ok {
+		// The string is not a predicate
+		return "", 0, false
+	}
+
+	return predicateName, advance, true
+}
+
+// ScanBalancedParens will return the full string including
+// and inside the parantheses that start with the first character.
+// This is different from ScanBalancedPattern because that attempts
+// to take into account whether the content looks like other filters.
+// In the case of predicates, we offload the job of parsing parameters
+// onto the predicates themselves, so we just want the full content
+// of the parameters, whatever it contains.
+func ScanBalancedParens(buf []byte) (string, int, bool) {
+	var r rune
+	var count int
+	var result []rune
+
+	next := func() rune {
+		r, advance := utf8.DecodeRune(buf)
+		count += advance
+		buf = buf[advance:]
+		result = append(result, r)
+		return r
+	}
+
+	r = next()
+	if r != '(' {
+		panic(fmt.Sprintf("ScanBalancedParens expects the input buffer to start with delimiter (, but it starts with %s.", string(r)))
+	}
+	balance := 1
+
+	for {
+		r = next()
+		if r == utf8.RuneError {
+			return "", 0, false
+		}
+		switch r {
+		case '(':
+			balance++
+		case ')':
+			balance--
+		case '\\':
+			// Consume the next escaped value since an escaped paren
+			// won't ever affect the balance
+			_ = next()
+		}
+		if balance == 0 {
+			break
+		}
+	}
+
+	return string(result), count, true
+}
+
 // ScanDelimited takes a delimited (e.g., quoted) value for some arbitrary
 // delimiter, returning the undelimited value, and the end position of the
 // original delimited value (i.e., including quotes). `\` is treated as an
@@ -618,17 +721,18 @@ func (p *parser) TryParseDelimiter() (string, rune, bool) {
 	return "", 0, false
 }
 
-// ParseFieldValue parses a value after a field like "repo:". If the value
-// starts with a recognized quoting delimiter but does not close it, an error is
+// ParseFieldValue parses a value after a field like "repo:". It returns the
+// parsed value and any labels to annotate this value with. If the value starts
+// with a recognized quoting delimiter but does not close it, an error is
 // returned.
-func (p *parser) ParseFieldValue() (string, error) {
-	delimited := func(delimiter rune) (string, error) {
+func (p *parser) ParseFieldValue(field string) (string, labels, error) {
+	delimited := func(delimiter rune) (string, labels, error) {
 		value, advance, err := ScanDelimited(p.buf[p.pos:], true, delimiter)
 		if err != nil {
-			return "", err
+			return "", None, err
 		}
 		p.pos += advance
-		return value, nil
+		return value, Quoted, nil
 	}
 	if p.match(SQUOTE) {
 		return delimited('\'')
@@ -636,15 +740,26 @@ func (p *parser) ParseFieldValue() (string, error) {
 	if p.match(DQUOTE) {
 		return delimited('"')
 	}
+
+	value, advance, ok := ScanPredicate(field, p.buf[p.pos:])
+	if ok {
+		p.pos += advance
+		return value, IsPredicate, nil
+	}
+
 	// First try scan a field value for cases like (a b repo:foo), where a
 	// trailing ) may be closing a group, and not part of the value.
-	value, advance, ok := ScanBalancedPattern(p.buf[p.pos:])
-	if !ok {
-		// The above failed, so attempt a best effort.
-		value, advance = ScanValue(p.buf[p.pos:], false)
+	value, advance, ok = ScanBalancedPattern(p.buf[p.pos:])
+	if ok {
+		p.pos += advance
+		return value, None, nil
+
 	}
+
+	// The above failed, so attempt a best effort.
+	value, advance = ScanValue(p.buf[p.pos:], false)
 	p.pos += advance
-	return value, nil
+	return value, None, nil
 }
 
 // Try parse a delimited pattern, quoted as "...", '...', or /.../.
@@ -687,7 +802,7 @@ func newPattern(value string, negated bool, labels labels, range_ Range) Pattern
 // Note that ParsePattern may be called multiple times (a query can have
 // multiple Patterns concatenated together).
 func (p *parser) ParsePattern(label labels) Pattern {
-	if label.isSet(Regexp) {
+	if label.IsSet(Regexp) {
 		// First try parse delimited values for regexp.
 		if pattern, ok := p.TryParseDelimitedPattern(); ok {
 			return pattern
@@ -703,7 +818,7 @@ func (p *parser) ParsePattern(label labels) Pattern {
 	start := p.pos
 	var value string
 	var advance int
-	if label.isSet(Regexp) {
+	if label.IsSet(Regexp) {
 		value, advance = ScanValue(p.buf[p.pos:], isSet(p.heuristics, allowDanglingParens))
 	} else {
 		value, advance = ScanAnyPattern(p.buf[p.pos:])
@@ -728,7 +843,7 @@ func (p *parser) ParseParameter() (Parameter, bool, error) {
 	}
 
 	p.pos += advance
-	value, err := p.ParseFieldValue()
+	value, labels, err := p.ParseFieldValue(field)
 	if err != nil {
 		return Parameter{}, false, err
 	}
@@ -736,7 +851,7 @@ func (p *parser) ParseParameter() (Parameter, bool, error) {
 		Field:      field,
 		Value:      value,
 		Negated:    negated,
-		Annotation: Annotation{Range: newRange(start, p.pos)},
+		Annotation: Annotation{Range: newRange(start, p.pos), Labels: labels},
 	}, true, nil
 }
 
@@ -789,7 +904,7 @@ loop:
 		case p.match(LPAREN) && !isSet(p.heuristics, allowDanglingParens):
 			if isSet(p.heuristics, parensAsPatterns) {
 				if value, advance, ok := ScanBalancedPattern(p.buf[p.pos:]); ok {
-					if label.isSet(Literal) {
+					if label.IsSet(Literal) {
 						label.set(HeuristicParensAsPatterns)
 					}
 					pattern := newPattern(value, false, label, newRange(p.pos, p.pos+advance))
@@ -810,7 +925,7 @@ loop:
 			nodes = append(nodes, result...)
 		case p.expect(RPAREN) && !isSet(p.heuristics, allowDanglingParens):
 			if p.balanced <= 0 {
-				return nil, errors.New("unbalanced expression: unmatched closing parenthesis )")
+				return nil, errors.New("unsupported expression. The combination of parentheses in the query have an unclear meaning. Try using the content: filter to quote patterns that contain parentheses")
 			}
 			p.balanced--
 			p.heuristics |= disambiguated
@@ -834,6 +949,9 @@ loop:
 			err := p.skipSpaces()
 			if err != nil {
 				return nil, err
+			}
+			if p.match(LPAREN) {
+				return nil, errors.New("it looks like you tried to use an expression after NOT. The NOT operator can only be used with simple search patterns or filters, and is not supported for expressions or subqueries")
 			}
 			if parameter, ok, _ := p.ParseParameter(); ok {
 				// we don't support NOT -field:value
@@ -997,8 +1115,8 @@ func (p *parser) tryFallbackParser(in string) ([]Node, error) {
 	return newOperator(nodes, And), nil
 }
 
-// ParseAndOr a raw input string into a parse tree comprising Nodes.
-func ParseAndOr(in string, searchType SearchType) ([]Node, error) {
+// Parse parses a raw input string into a parse tree comprising Nodes.
+func Parse(in string, searchType SearchType) ([]Node, error) {
 	if strings.TrimSpace(in) == "" {
 		return nil, nil
 	}
@@ -1045,45 +1163,14 @@ func ParseAndOr(in string, searchType SearchType) ([]Node, error) {
 	return newOperator(nodes, And), nil
 }
 
-type ParserOptions struct {
-	SearchType SearchType
-
-	// treat repo, file, or repohasfile values as glob syntax if true.
-	Globbing bool
+func ParseSearchType(in string, searchType SearchType) (Q, error) {
+	return Run(Init(in, searchType))
 }
 
-// ProcessAndOr query parses and validates an and/or query for a given search type.
-func ProcessAndOr(in string, options ParserOptions) (QueryInfo, error) {
-	var query []Node
-	var err error
+func ParseLiteral(in string) (Q, error) {
+	return Run(Init(in, SearchTypeLiteral))
+}
 
-	query, err = ParseAndOr(in, options.SearchType)
-	if err != nil {
-		return nil, err
-	}
-	query = Map(query, LowercaseFieldNames, SubstituteAliases(options.SearchType))
-
-	switch options.SearchType {
-	case SearchTypeLiteral:
-		query = Map(query, substituteConcat(space))
-	case SearchTypeStructural:
-		query = Map(query, labelStructural, ellipsesForHoles, substituteConcat(space))
-	case SearchTypeRegex:
-		query = Map(query, escapeParensHeuristic, substituteConcat(fuzzyRegexp))
-	}
-
-	if options.Globbing {
-		query, err = mapGlobToRegex(query)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	for _, disjunct := range Dnf(query) {
-		err = validate(disjunct)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return &AndOrQuery{Query: query}, nil
+func ParseRegexp(in string) (Q, error) {
+	return Run(Init(in, SearchTypeRegex))
 }

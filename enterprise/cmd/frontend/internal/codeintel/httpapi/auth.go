@@ -2,21 +2,19 @@ package httpapi
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/inconshreveable/log15"
-	"github.com/sourcegraph/sourcegraph/internal/db"
+
+	"github.com/sourcegraph/sourcegraph/internal/database"
 	"github.com/sourcegraph/sourcegraph/internal/errcode"
 )
 
 func isSiteAdmin(ctx context.Context) bool {
-	user, err := db.Users.GetByCurrentAuthUser(ctx)
+	user, err := database.GlobalUsers.GetByCurrentAuthUser(ctx)
 	if err != nil {
-		if errcode.IsNotFound(err) || err == db.ErrNoCurrentUser {
+		if errcode.IsNotFound(err) || err == database.ErrNoCurrentUser {
 			return false
 		}
 
@@ -45,14 +43,4 @@ func enforceAuth(ctx context.Context, w http.ResponseWriter, r *http.Request, re
 
 	http.Error(w, "verification not supported for code host - see https://github.com/sourcegraph/sourcegraph/issues/4967", http.StatusUnprocessableEntity)
 	return false
-}
-
-func makeUploadRequest(host string, q url.Values, body io.Reader) (*http.Request, error) {
-	url, err := url.Parse(fmt.Sprintf("%s/upload", host))
-	if err != nil {
-		return nil, err
-	}
-	url.RawQuery = q.Encode()
-
-	return http.NewRequest("POST", url.String(), body)
 }

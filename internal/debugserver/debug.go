@@ -12,10 +12,11 @@ import (
 	"github.com/felixge/fgprof"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"golang.org/x/net/trace"
+
 	"github.com/sourcegraph/sourcegraph/internal/env"
 	"github.com/sourcegraph/sourcegraph/internal/goroutine"
 	"github.com/sourcegraph/sourcegraph/internal/httpserver"
-	"golang.org/x/net/trace"
 )
 
 var addr = env.Get("SRC_PROF_HTTP", ":6060", "net/http/pprof http bind address.")
@@ -36,6 +37,9 @@ func init() {
 			}
 		}
 	}
+
+	// ensure we're exporting metadata for this service
+	registerMetadataGauge()
 }
 
 // Endpoint is a handler for the debug server. It will be displayed on the
@@ -73,7 +77,9 @@ type Dumper interface {
 }
 
 // NewServerRoutine returns a background routine that exposes pprof and metrics endpoints.
-func NewServerRoutine(extra ...Endpoint) goroutine.BackgroundRoutine {
+// The given channel should be closed once the ready endpoint should begin to return 200 OK.
+// Any extra endpoints supplied will be registered via their own declared path.
+func NewServerRoutine(ready <-chan struct{}, extra ...Endpoint) goroutine.BackgroundRoutine {
 	if addr == "" {
 		return goroutine.NoopRoutine()
 	}
@@ -105,6 +111,8 @@ func NewServerRoutine(extra ...Endpoint) goroutine.BackgroundRoutine {
 		})
 
 		router.Handle("/", index)
+		router.Handle("/healthz", http.HandlerFunc(healthzHandler))
+		router.Handle("/ready", readyHandler(ready))
 		router.Handle("/debug", index)
 		router.Handle("/vars", http.HandlerFunc(expvarHandler))
 		router.Handle("/gc", http.HandlerFunc(gcHandler))
@@ -127,10 +135,4 @@ func NewServerRoutine(extra ...Endpoint) goroutine.BackgroundRoutine {
 	})
 
 	return httpserver.NewFromAddr(addr, &http.Server{Handler: handler})
-}
-
-// Start runs a debug server (pprof, prometheus, etc) if it is configured (via
-// SRC_PROF_HTTP environment variable). It is blocking.
-func Start(extra ...Endpoint) {
-	NewServerRoutine(extra...).Start()
 }

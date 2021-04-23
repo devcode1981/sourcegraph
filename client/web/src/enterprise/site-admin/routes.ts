@@ -1,6 +1,7 @@
 import { siteAdminAreaRoutes } from '../../site-admin/routes'
 import { SiteAdminAreaRoute } from '../../site-admin/SiteAdminArea'
 import { lazyComponent } from '../../util/lazyComponent'
+import { SHOW_BUSINESS_FEATURES } from '../dotcom/productSubscriptions/features'
 
 export const enterpriseSiteAdminAreaRoutes: readonly SiteAdminAreaRoute[] = [
     ...siteAdminAreaRoutes,
@@ -18,6 +19,7 @@ export const enterpriseSiteAdminAreaRoutes: readonly SiteAdminAreaRoute[] = [
             () => import('./dotcom/customers/SiteAdminCustomersPage'),
             'SiteAdminProductCustomersPage'
         ),
+        condition: () => SHOW_BUSINESS_FEATURES,
         exact: true,
     },
     {
@@ -26,6 +28,7 @@ export const enterpriseSiteAdminAreaRoutes: readonly SiteAdminAreaRoute[] = [
             () => import('./dotcom/productSubscriptions/SiteAdminCreateProductSubscriptionPage'),
             'SiteAdminCreateProductSubscriptionPage'
         ),
+        condition: () => SHOW_BUSINESS_FEATURES,
         exact: true,
     },
     {
@@ -34,6 +37,7 @@ export const enterpriseSiteAdminAreaRoutes: readonly SiteAdminAreaRoute[] = [
             () => import('./dotcom/productSubscriptions/SiteAdminProductSubscriptionPage'),
             'SiteAdminProductSubscriptionPage'
         ),
+        condition: () => SHOW_BUSINESS_FEATURES,
         exact: true,
     },
     {
@@ -42,6 +46,7 @@ export const enterpriseSiteAdminAreaRoutes: readonly SiteAdminAreaRoute[] = [
             () => import('./dotcom/productSubscriptions/SiteAdminProductSubscriptionsPage'),
             'SiteAdminProductSubscriptionsPage'
         ),
+        condition: () => SHOW_BUSINESS_FEATURES,
         exact: true,
     },
     {
@@ -50,6 +55,7 @@ export const enterpriseSiteAdminAreaRoutes: readonly SiteAdminAreaRoute[] = [
             () => import('./dotcom/productSubscriptions/SiteAdminProductLicensesPage'),
             'SiteAdminProductLicensesPage'
         ),
+        condition: () => SHOW_BUSINESS_FEATURES,
         exact: true,
     },
     {
@@ -70,6 +76,18 @@ export const enterpriseSiteAdminAreaRoutes: readonly SiteAdminAreaRoute[] = [
         render: lazyComponent(() => import('./SiteAdminRegistryExtensionsPage'), 'SiteAdminRegistryExtensionsPage'),
         exact: true,
     },
+
+    {
+        path: '/batch-changes',
+        exact: true,
+        render: lazyComponent(
+            () => import('../batches/settings/BatchChangesSiteConfigSettingsArea'),
+            'BatchChangesSiteConfigSettingsArea'
+        ),
+        condition: ({ isSourcegraphDotCom }) => !isSourcegraphDotCom && window.context.batchChangesEnabled,
+    },
+
+    // Code intelligence upload routes
     {
         path: '/code-intelligence/uploads',
         render: lazyComponent(() => import('../codeintel/list/CodeIntelUploadsPage'), 'CodeIntelUploadsPage'),
@@ -80,16 +98,22 @@ export const enterpriseSiteAdminAreaRoutes: readonly SiteAdminAreaRoute[] = [
         render: lazyComponent(() => import('../codeintel/detail/CodeIntelUploadPage'), 'CodeIntelUploadPage'),
         exact: true,
     },
+
+    // Auto indexing routes
     {
         path: '/code-intelligence/indexes',
         render: lazyComponent(() => import('../codeintel/list/CodeIntelIndexesPage'), 'CodeIntelIndexesPage'),
         exact: true,
+        condition: () => Boolean(window.context?.codeIntelAutoIndexingEnabled),
     },
     {
         path: '/code-intelligence/indexes/:id',
         render: lazyComponent(() => import('../codeintel/detail/CodeIntelIndexPage'), 'CodeIntelIndexPage'),
         exact: true,
+        condition: () => Boolean(window.context?.codeIntelAutoIndexingEnabled),
     },
+
+    // Legacy routes
     {
         path: '/lsif-uploads/:id',
         render: lazyComponent(() => import('./SiteAdminLsifUploadPage'), 'SiteAdminLsifUploadPage'),

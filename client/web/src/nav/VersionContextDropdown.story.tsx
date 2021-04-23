@@ -1,17 +1,23 @@
-import * as H from 'history'
-import { storiesOf } from '@storybook/react'
-import React from 'react'
-import { VersionContextDropdown, VersionContextDropdownProps } from './VersionContextDropdown'
-import { subtypeOf } from '../../../shared/src/util/types'
 import { action } from '@storybook/addon-actions'
-import { SearchPatternType } from '../graphql-operations'
+import { storiesOf } from '@storybook/react'
+import * as H from 'history'
+import React from 'react'
+
+import { subtypeOf } from '@sourcegraph/shared/src/util/types'
+
 import { WebStory } from '../components/WebStory'
+import { SearchPatternType } from '../graphql-operations'
+
+import { VersionContextDropdown, VersionContextDropdownProps } from './VersionContextDropdown'
 
 const { add } = storiesOf('web/VersionContextDropdown', module).addDecorator(story => (
     <WebStory>{() => story()}</WebStory>
 ))
 
-const setVersionContext = action('setVersionContext')
+const setVersionContext = () => {
+    action('setVersionContext')
+    return Promise.resolve()
+}
 const history = H.createMemoryHistory({ keyLength: 0 })
 const commonProps = subtypeOf<Partial<VersionContextDropdownProps>>()({
     alwaysShow: true,
@@ -25,6 +31,7 @@ const commonProps = subtypeOf<Partial<VersionContextDropdownProps>>()({
         { name: 'test 3', description: 'test 3', revisions: [{ rev: 'test', repo: 'github.com/test/test' }] },
     ],
     navbarSearchQuery: 'test',
+    selectedSearchContextSpec: 'global',
     setVersionContext,
 })
 

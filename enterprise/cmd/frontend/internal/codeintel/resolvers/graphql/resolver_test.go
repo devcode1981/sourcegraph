@@ -14,22 +14,29 @@ import (
 	resolvermocks "github.com/sourcegraph/sourcegraph/enterprise/cmd/frontend/internal/codeintel/resolvers/mocks"
 	store "github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/stores/dbstore"
 	"github.com/sourcegraph/sourcegraph/internal/api"
-	"github.com/sourcegraph/sourcegraph/internal/db"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbtesting"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 )
 
+func init() {
+	autoIndexingEnabled = func() bool { return true }
+}
+
 func TestDeleteLSIFUpload(t *testing.T) {
+	db := new(dbtesting.MockDB)
+
 	t.Cleanup(func() {
-		db.Mocks.Users.GetByCurrentAuthUser = nil
+		database.Mocks.Users.GetByCurrentAuthUser = nil
 	})
-	db.Mocks.Users.GetByCurrentAuthUser = func(ctx context.Context) (*types.User, error) {
+	database.Mocks.Users.GetByCurrentAuthUser = func(ctx context.Context) (*types.User, error) {
 		return &types.User{SiteAdmin: true}, nil
 	}
 
 	id := graphql.ID(base64.StdEncoding.EncodeToString([]byte("LSIFUpload:42")))
 	mockResolver := resolvermocks.NewMockResolver()
 
-	if _, err := NewResolver(mockResolver).DeleteLSIFUpload(context.Background(), id); err != nil {
+	if _, err := NewResolver(db, mockResolver).DeleteLSIFUpload(context.Background(), &struct{ ID graphql.ID }{id}); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
@@ -42,26 +49,30 @@ func TestDeleteLSIFUpload(t *testing.T) {
 }
 
 func TestDeleteLSIFUploadUnauthenticated(t *testing.T) {
+	db := new(dbtesting.MockDB)
+
 	id := graphql.ID(base64.StdEncoding.EncodeToString([]byte("LSIFUpload:42")))
 	mockResolver := resolvermocks.NewMockResolver()
 
-	if _, err := NewResolver(mockResolver).DeleteLSIFUpload(context.Background(), id); err != backend.ErrNotAuthenticated {
+	if _, err := NewResolver(db, mockResolver).DeleteLSIFUpload(context.Background(), &struct{ ID graphql.ID }{id}); err != backend.ErrNotAuthenticated {
 		t.Errorf("unexpected error. want=%q have=%q", backend.ErrNotAuthenticated, err)
 	}
 }
 
 func TestDeleteLSIFIndex(t *testing.T) {
+	db := new(dbtesting.MockDB)
+
 	t.Cleanup(func() {
-		db.Mocks.Users.GetByCurrentAuthUser = nil
+		database.Mocks.Users.GetByCurrentAuthUser = nil
 	})
-	db.Mocks.Users.GetByCurrentAuthUser = func(ctx context.Context) (*types.User, error) {
+	database.Mocks.Users.GetByCurrentAuthUser = func(ctx context.Context) (*types.User, error) {
 		return &types.User{SiteAdmin: true}, nil
 	}
 
 	id := graphql.ID(base64.StdEncoding.EncodeToString([]byte("LSIFIndex:42")))
 	mockResolver := resolvermocks.NewMockResolver()
 
-	if _, err := NewResolver(mockResolver).DeleteLSIFIndex(context.Background(), id); err != nil {
+	if _, err := NewResolver(db, mockResolver).DeleteLSIFIndex(context.Background(), &struct{ ID graphql.ID }{id}); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
@@ -74,19 +85,21 @@ func TestDeleteLSIFIndex(t *testing.T) {
 }
 
 func TestDeleteLSIFIndexUnauthenticated(t *testing.T) {
+	db := new(dbtesting.MockDB)
+
 	id := graphql.ID(base64.StdEncoding.EncodeToString([]byte("LSIFIndex:42")))
 	mockResolver := resolvermocks.NewMockResolver()
 
-	if _, err := NewResolver(mockResolver).DeleteLSIFIndex(context.Background(), id); err != backend.ErrNotAuthenticated {
+	if _, err := NewResolver(db, mockResolver).DeleteLSIFIndex(context.Background(), &struct{ ID graphql.ID }{id}); err != backend.ErrNotAuthenticated {
 		t.Errorf("unexpected error. want=%q have=%q", backend.ErrNotAuthenticated, err)
 	}
 }
 
 func TestMakeGetUploadsOptions(t *testing.T) {
 	t.Cleanup(func() {
-		db.Mocks.Repos.Get = nil
+		database.Mocks.Repos.Get = nil
 	})
-	db.Mocks.Repos.Get = func(v0 context.Context, id api.RepoID) (*types.Repo, error) {
+	database.Mocks.Repos.Get = func(v0 context.Context, id api.RepoID) (*types.Repo, error) {
 		if id != 50 {
 			t.Errorf("unexpected repository name. want=%d have=%d", 50, id)
 		}
@@ -145,9 +158,9 @@ func TestMakeGetUploadsOptionsDefaults(t *testing.T) {
 
 func TestMakeGetIndexesOptions(t *testing.T) {
 	t.Cleanup(func() {
-		db.Mocks.Repos.Get = nil
+		database.Mocks.Repos.Get = nil
 	})
-	db.Mocks.Repos.Get = func(v0 context.Context, id api.RepoID) (*types.Repo, error) {
+	database.Mocks.Repos.Get = func(v0 context.Context, id api.RepoID) (*types.Repo, error) {
 		if id != 50 {
 			t.Errorf("unexpected repository name. want=%d have=%d", 50, id)
 		}

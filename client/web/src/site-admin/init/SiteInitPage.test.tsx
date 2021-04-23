@@ -1,8 +1,8 @@
 import React from 'react'
-import renderer from 'react-test-renderer'
-import { SiteInitPage } from './SiteInitPage'
 import { MemoryRouter, Redirect } from 'react-router'
-import { createMemoryHistory } from 'history'
+import renderer from 'react-test-renderer'
+
+import { SiteInitPage } from './SiteInitPage'
 
 describe('SiteInitPage', () => {
     const origContext = window.context
@@ -22,7 +22,6 @@ describe('SiteInitPage', () => {
                     isLightTheme={true}
                     needsSiteInit={false}
                     authenticatedUser={null}
-                    history={createMemoryHistory()}
                     context={{ authProviders: [], sourcegraphDotComMode: false }}
                 />
             </MemoryRouter>
@@ -40,7 +39,6 @@ describe('SiteInitPage', () => {
                         isLightTheme={true}
                         needsSiteInit={true}
                         authenticatedUser={{ username: 'alice' }}
-                        history={createMemoryHistory()}
                         context={{ authProviders: [], sourcegraphDotComMode: false }}
                     />
                 )
@@ -55,7 +53,6 @@ describe('SiteInitPage', () => {
                         isLightTheme={true}
                         needsSiteInit={true}
                         authenticatedUser={null}
-                        history={createMemoryHistory()}
                         context={{ authProviders: [], sourcegraphDotComMode: false }}
                     />
                 )

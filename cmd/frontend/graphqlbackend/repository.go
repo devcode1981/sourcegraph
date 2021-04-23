@@ -15,11 +15,14 @@ import (
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/backend"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend/externallink"
 	"github.com/sourcegraph/sourcegraph/internal/api"
-	"github.com/sourcegraph/sourcegraph/internal/db"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc/phabricator"
 	"github.com/sourcegraph/sourcegraph/internal/gitserver"
 	"github.com/sourcegraph/sourcegraph/internal/gitserver/protocol"
+	"github.com/sourcegraph/sourcegraph/internal/search/filter"
+	"github.com/sourcegraph/sourcegraph/internal/search/result"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 	"github.com/sourcegraph/sourcegraph/internal/vcs"
 	"github.com/sourcegraph/sourcegraph/internal/vcs/git"
@@ -32,43 +35,60 @@ type RepositoryResolver struct {
 	hydration sync.Once
 	err       error
 
+	// Invariant: Name and ID of RepoMatch are always set and safe to use. They are
+	// used to hydrate the inner repo, and should always be the same as the name and
+	// id of the inner repo, but referring to the inner repo directly is unsafe
+	// because it may cause a race during hydration.
+	result.RepoMatch
+
+	db dbutil.DB
+
 	// innerRepo may only contain ID and Name information.
 	// To access any other repo information, use repo() instead.
 	innerRepo *types.Repo
-	icon      string
 
 	defaultBranchOnce sync.Once
 	defaultBranch     *GitRefResolver
 	defaultBranchErr  error
-
-	// rev optionally specifies a revision to go to for search results.
-	rev string
 }
 
-func NewRepositoryResolver(repo *types.Repo) *RepositoryResolver {
-	return &RepositoryResolver{innerRepo: repo}
+func NewRepositoryResolver(db dbutil.DB, repo *types.Repo) *RepositoryResolver {
+	// Protect against a nil repo
+	var name api.RepoName
+	var id api.RepoID
+	if repo != nil {
+		name = repo.Name
+		id = repo.ID
+	}
+
+	return &RepositoryResolver{
+		db:        db,
+		innerRepo: repo,
+		RepoMatch: result.RepoMatch{
+			Name: name,
+			ID:   id,
+		},
+	}
 }
 
-var RepositoryByID = repositoryByID
-
-func repositoryByID(ctx context.Context, id graphql.ID) (*RepositoryResolver, error) {
+func (r *schemaResolver) repositoryByID(ctx context.Context, id graphql.ID) (*RepositoryResolver, error) {
 	var repoID api.RepoID
 	if err := relay.UnmarshalSpec(id, &repoID); err != nil {
 		return nil, err
 	}
-	repo, err := db.Repos.Get(ctx, repoID)
+	repo, err := database.GlobalRepos.Get(ctx, repoID)
 	if err != nil {
 		return nil, err
 	}
-	return &RepositoryResolver{innerRepo: repo}, nil
+	return NewRepositoryResolver(r.db, repo), nil
 }
 
-func RepositoryByIDInt32(ctx context.Context, repoID api.RepoID) (*RepositoryResolver, error) {
-	repo, err := db.Repos.Get(ctx, repoID)
+func RepositoryByIDInt32(ctx context.Context, db dbutil.DB, repoID api.RepoID) (*RepositoryResolver, error) {
+	repo, err := database.GlobalRepos.Get(ctx, repoID)
 	if err != nil {
 		return nil, err
 	}
-	return &RepositoryResolver{innerRepo: repo}, nil
+	return NewRepositoryResolver(db, repo), nil
 }
 
 func (r *RepositoryResolver) ID() graphql.ID {
@@ -76,7 +96,7 @@ func (r *RepositoryResolver) ID() graphql.ID {
 }
 
 func (r *RepositoryResolver) IDInt32() api.RepoID {
-	return r.innerRepo.ID
+	return r.RepoMatch.ID
 }
 
 func MarshalRepositoryID(repo api.RepoID) graphql.ID { return relay.MarshalID("Repository", repo) }
@@ -86,14 +106,30 @@ func UnmarshalRepositoryID(id graphql.ID) (repo api.RepoID, err error) {
 	return
 }
 
+func (r *RepositoryResolver) Select(path filter.SelectPath) SearchResultResolver {
+	match := r.RepoMatch.Select(path)
+
+	// Turn result type back into a resolver
+	switch v := match.(type) {
+	case *result.RepoMatch:
+		return NewRepositoryResolver(r.db, &types.Repo{Name: v.Name, ID: v.ID})
+	}
+
+	return nil
+}
+
 // repo makes sure the repo is hydrated before returning it.
 func (r *RepositoryResolver) repo(ctx context.Context) (*types.Repo, error) {
 	err := r.hydrate(ctx)
 	return r.innerRepo, err
 }
 
+func (r *RepositoryResolver) RepoName() api.RepoName {
+	return r.RepoMatch.Name
+}
+
 func (r *RepositoryResolver) Name() string {
-	return string(r.innerRepo.Name)
+	return string(r.RepoMatch.Name)
 }
 
 func (r *RepositoryResolver) ExternalRepo(ctx context.Context) (*api.ExternalRepoSpec, error) {
@@ -163,7 +199,7 @@ func (r *RepositoryResolver) Commit(ctx context.Context, args *RepositoryCommitA
 }
 
 func (r *RepositoryResolver) CommitFromID(ctx context.Context, args *RepositoryCommitArgs, commitID api.CommitID) (*GitCommitResolver, error) {
-	resolver := toGitCommitResolver(r, commitID, nil)
+	resolver := toGitCommitResolver(r, r.db, commitID, nil)
 	if args.InputRevspec != nil {
 		resolver.inputRev = args.InputRevspec
 	} else {
@@ -174,12 +210,12 @@ func (r *RepositoryResolver) CommitFromID(ctx context.Context, args *RepositoryC
 
 func (r *RepositoryResolver) DefaultBranch(ctx context.Context) (*GitRefResolver, error) {
 	do := func() (*GitRefResolver, error) {
-		refBytes, _, exitCode, err := git.ExecSafe(ctx, r.innerRepo.Name, []string{"symbolic-ref", "HEAD"})
+		refBytes, _, exitCode, err := git.ExecSafe(ctx, r.RepoName(), []string{"symbolic-ref", "HEAD"})
 		refName := string(bytes.TrimSpace(refBytes))
 
 		if err == nil && exitCode == 0 {
 			// Check that our repo is not empty
-			_, err = git.ResolveRevision(ctx, r.innerRepo.Name, "HEAD", git.ResolveRevisionOptions{NoEnsureRevision: true})
+			_, err = git.ResolveRevision(ctx, r.RepoName(), "HEAD", git.ResolveRevisionOptions{NoEnsureRevision: true})
 		}
 
 		// If we fail to get the default branch due to cloning or being empty, we return nothing.
@@ -240,8 +276,8 @@ func (r *RepositoryResolver) UpdatedAt() *DateTime {
 
 func (r *RepositoryResolver) URL() string {
 	url := "/" + escapePathForURL(r.Name())
-	if r.rev != "" {
-		url += "@" + escapePathForURL(r.rev)
+	if r.Rev() != "" {
+		url += "@" + escapePathForURL(r.Rev())
 	}
 	return url
 }
@@ -251,30 +287,30 @@ func (r *RepositoryResolver) ExternalURLs(ctx context.Context) ([]*externallink.
 	if err != nil {
 		return nil, err
 	}
-	return externallink.Repository(ctx, repo)
+	return externallink.Repository(ctx, r.db, repo)
 }
 
 func (r *RepositoryResolver) Icon() string {
-	return r.icon
+	return "data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjEiIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIKCSB2aWV3Qm94PSIwIDAgNjQgNjQiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDY0IDY0OyIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+Cjx0aXRsZT5JY29ucyA0MDA8L3RpdGxlPgo8Zz4KCTxwYXRoIGQ9Ik0yMywyMi40YzEuMywwLDIuNC0xLjEsMi40LTIuNHMtMS4xLTIuNC0yLjQtMi40Yy0xLjMsMC0yLjQsMS4xLTIuNCwyLjRTMjEuNywyMi40LDIzLDIyLjR6Ii8+Cgk8cGF0aCBkPSJNMzUsMjYuNGMxLjMsMCwyLjQtMS4xLDIuNC0yLjRzLTEuMS0yLjQtMi40LTIuNHMtMi40LDEuMS0yLjQsMi40UzMzLjcsMjYuNCwzNSwyNi40eiIvPgoJPHBhdGggZD0iTTIzLDQyLjRjMS4zLDAsMi40LTEuMSwyLjQtMi40cy0xLjEtMi40LTIuNC0yLjRzLTIuNCwxLjEtMi40LDIuNFMyMS43LDQyLjQsMjMsNDIuNHoiLz4KCTxwYXRoIGQ9Ik01MCwxNmgtMS41Yy0wLjMsMC0wLjUsMC4yLTAuNSwwLjV2MzVjMCwwLjMtMC4yLDAuNS0wLjUsMC41aC0yN2MtMC41LDAtMS0wLjItMS40LTAuNmwtMC42LTAuNmMtMC4xLTAuMS0wLjEtMC4yLTAuMS0wLjQKCQljMC0wLjMsMC4yLTAuNSwwLjUtMC41SDQ0YzEuMSwwLDItMC45LDItMlYxMmMwLTEuMS0wLjktMi0yLTJIMTRjLTEuMSwwLTIsMC45LTIsMnYzNi4zYzAsMS4xLDAuNCwyLjEsMS4yLDIuOGwzLjEsMy4xCgkJYzEuMSwxLjEsMi43LDEuOCw0LjIsMS44SDUwYzEuMSwwLDItMC45LDItMlYxOEM1MiwxNi45LDUxLjEsMTYsNTAsMTZ6IE0xOSwyMGMwLTIuMiwxLjgtNCw0LTRjMS40LDAsMi44LDAuOCwzLjUsMgoJCWMxLjEsMS45LDAuNCw0LjMtMS41LDUuNFYzM2MxLTAuNiwyLjMtMC45LDQtMC45YzEsMCwyLTAuNSwyLjgtMS4zQzMyLjUsMzAsMzMsMjkuMSwzMywyOHYtMC42Yy0xLjItMC43LTItMi0yLTMuNQoJCWMwLTIuMiwxLjgtNCw0LTRjMi4yLDAsNCwxLjgsNCw0YzAsMS41LTAuOCwyLjctMiwzLjVoMGMtMC4xLDIuMS0wLjksNC40LTIuNSw2Yy0xLjYsMS42LTMuNCwyLjQtNS41LDIuNWMtMC44LDAtMS40LDAuMS0xLjksMC4zCgkJYy0wLjIsMC4xLTEsMC44LTEuMiwwLjlDMjYuNiwzOCwyNywzOC45LDI3LDQwYzAsMi4yLTEuOCw0LTQsNHMtNC0xLjgtNC00YzAtMS41LDAuOC0yLjcsMi0zLjRWMjMuNEMxOS44LDIyLjcsMTksMjEuNCwxOSwyMHoiLz4KPC9nPgo8L3N2Zz4K"
 }
 
 func (r *RepositoryResolver) Rev() string {
-	return r.rev
+	return r.RepoMatch.Rev
 }
 
 func (r *RepositoryResolver) Label() (Markdown, error) {
 	var label string
-	if r.rev != "" {
-		label = r.Name() + "@" + r.rev
+	if r.Rev() != "" {
+		label = r.Name() + "@" + r.Rev()
 	} else {
 		label = r.Name()
 	}
-	text := "[" + label + "](/" + label + ")"
+	text := "[" + label + "](" + r.URL() + ")"
 	return Markdown(text), nil
 }
 
 func (r *RepositoryResolver) Detail() Markdown {
-	return Markdown("Repository name match")
+	return Markdown("Repository match")
 }
 
 func (r *RepositoryResolver) Matches() []*searchResultMatchResolver {
@@ -287,7 +323,7 @@ func (r *RepositoryResolver) ToCommitSearchResult() (*CommitSearchResultResolver
 	return nil, false
 }
 
-func (r *RepositoryResolver) resultCount() int32 {
+func (r *RepositoryResolver) ResultCount() int32 {
 	return 1
 }
 
@@ -306,7 +342,7 @@ func (r *RepositoryResolver) hydrate(ctx context.Context) error {
 		log15.Debug("RepositoryResolver.hydrate", "repo.ID", r.IDInt32())
 
 		var repo *types.Repo
-		repo, r.err = db.Repos.Get(ctx, r.IDInt32())
+		repo, r.err = database.GlobalRepos.Get(ctx, r.IDInt32())
 		if r.err == nil {
 			r.innerRepo = repo
 		}
@@ -333,6 +369,10 @@ func (r *RepositoryResolver) IndexConfiguration(ctx context.Context) (IndexConfi
 	return EnterpriseResolvers.codeIntelResolver.IndexConfiguration(ctx, r.ID())
 }
 
+func (r *RepositoryResolver) CodeIntelligenceCommitGraph(ctx context.Context) (CodeIntelligenceCommitGraphResolver, error) {
+	return EnterpriseResolvers.codeIntelResolver.CommitGraph(ctx, r.ID())
+}
+
 type AuthorizedUserArgs struct {
 	RepositoryID graphql.ID
 	Permission   string
@@ -356,7 +396,7 @@ func (r *RepositoryResolver) PermissionsInfo(ctx context.Context) (PermissionsIn
 	return EnterpriseResolvers.authzResolver.RepositoryPermissionsInfo(ctx, r.ID())
 }
 
-func (*schemaResolver) AddPhabricatorRepo(ctx context.Context, args *struct {
+func (r *schemaResolver) AddPhabricatorRepo(ctx context.Context, args *struct {
 	Callsign string
 	Name     *string
 	// TODO(chris): Remove URI in favor of Name.
@@ -367,14 +407,14 @@ func (*schemaResolver) AddPhabricatorRepo(ctx context.Context, args *struct {
 		args.URI = args.Name
 	}
 
-	_, err := db.Phabricator.CreateIfNotExists(ctx, args.Callsign, api.RepoName(*args.URI), args.URL)
+	_, err := database.Phabricator(r.db).CreateIfNotExists(ctx, args.Callsign, api.RepoName(*args.URI), args.URL)
 	if err != nil {
 		log15.Error("adding phabricator repo", "callsign", args.Callsign, "name", args.URI, "url", args.URL)
 	}
 	return nil, err
 }
 
-func (*schemaResolver) ResolvePhabricatorDiff(ctx context.Context, args *struct {
+func (r *schemaResolver) ResolvePhabricatorDiff(ctx context.Context, args *struct {
 	RepoName    string
 	DiffID      int32
 	BaseRev     string
@@ -384,7 +424,7 @@ func (*schemaResolver) ResolvePhabricatorDiff(ctx context.Context, args *struct 
 	Description *string
 	Date        *string
 }) (*GitCommitResolver, error) {
-	repo, err := db.Repos.GetByName(ctx, api.RepoName(args.RepoName))
+	repo, err := database.GlobalRepos.GetByName(ctx, api.RepoName(args.RepoName))
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +440,7 @@ func (*schemaResolver) ResolvePhabricatorDiff(ctx context.Context, args *struct 
 		if err != nil {
 			return nil, err
 		}
-		r := &RepositoryResolver{innerRepo: repo}
+		r := NewRepositoryResolver(r.db, repo)
 		return r.Commit(ctx, &RepositoryCommitArgs{Rev: targetRef})
 	}
 
@@ -410,7 +450,7 @@ func (*schemaResolver) ResolvePhabricatorDiff(ctx context.Context, args *struct 
 	}
 
 	origin := ""
-	if phabRepo, err := db.Phabricator.GetByName(ctx, api.RepoName(args.RepoName)); err == nil {
+	if phabRepo, err := database.Phabricator(r.db).GetByName(ctx, api.RepoName(args.RepoName)); err == nil {
 		origin = phabRepo.URL
 	}
 
@@ -486,14 +526,14 @@ func (*schemaResolver) ResolvePhabricatorDiff(ctx context.Context, args *struct 
 }
 
 func makePhabClientForOrigin(ctx context.Context, origin string) (*phabricator.Client, error) {
-	opt := db.ExternalServicesListOptions{
+	opt := database.ExternalServicesListOptions{
 		Kinds: []string{extsvc.KindPhabricator},
-		LimitOffset: &db.LimitOffset{
+		LimitOffset: &database.LimitOffset{
 			Limit: 500, // The number is randomly chosen
 		},
 	}
 	for {
-		svcs, err := db.ExternalServices.List(ctx, opt)
+		svcs, err := database.GlobalExternalServices.List(ctx, opt)
 		if err != nil {
 			return nil, errors.Wrap(err, "list")
 		}

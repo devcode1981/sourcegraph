@@ -4,6 +4,10 @@ Sourcegraph can be configured to enforce repository permissions from code hosts.
 
 Currently, GitHub, GitHub Enterprise, GitLab and Bitbucket Server permissions are supported. Check our [product direction](https://about.sourcegraph.com/direction) for plans to support other code hosts. If your desired code host is not yet on the roadmap, please [open a feature request](https://github.com/sourcegraph/sourcegraph/issues/new?template=feature_request.md).
 
+If the Sourcegraph instance is configured to sync repositories from multiple code hosts (regardless of whether they are the same code host, e.g. `GitHub + GitHub` or `GitHub + GitLab`), setting up permissions for each code host will make repository permissions apply holistically on Sourcegraph. 
+
+Setting up a unified SSO for code hosts and Sourcegraph is also possible: how to [Set up Sourcegraph with two GitLab and Keycloak using SAML](https://unknwon.io/posts/200915_setup-sourcegraph-gitlab-keycloak/).
+
 > NOTE: Site admin users bypass all permission checks and have access to every repository on Sourcegraph.
 
 ## GitHub
@@ -78,7 +82,7 @@ Then, [add or edit a GitLab connection](../external_service/gitlab.md#repository
 
 `$AUTH_PROVIDER_ID` and `$AUTH_PROVIDER_TYPE` identify the authentication provider to use and should
 match the fields specified in the authentication provider config
-(`auth.providers`). 
+(`auth.providers`). The authProviderID can be found in the `configID` field of the auth provider config.
 
 `$AUTH_PROVIDER_GITLAB_ID` should match the `identities.provider` returned by
 [the admin GitLab Users API endpoint](https://docs.gitlab.com/ee/api/users.html#for-admins).

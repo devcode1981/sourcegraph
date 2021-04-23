@@ -15,7 +15,7 @@ import (
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/inventory"
 	"github.com/sourcegraph/sourcegraph/internal/api"
 	"github.com/sourcegraph/sourcegraph/internal/conf"
-	"github.com/sourcegraph/sourcegraph/internal/db"
+	"github.com/sourcegraph/sourcegraph/internal/database"
 	"github.com/sourcegraph/sourcegraph/internal/errcode"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc"
 	"github.com/sourcegraph/sourcegraph/internal/gitserver"
@@ -36,9 +36,13 @@ func (e ErrRepoSeeOther) Error() string {
 	return fmt.Sprintf("repo not found at this location, but might exist at %s", e.RedirectURL)
 }
 
-var Repos = &repos{}
+var Repos = &repos{
+	store: database.GlobalRepos,
+}
 
-type repos struct{}
+type repos struct {
+	store *database.RepoStore
+}
 
 func (s *repos) Get(ctx context.Context, repo api.RepoID) (_ *types.Repo, err error) {
 	if Mocks.Repos.Get != nil {
@@ -48,7 +52,7 @@ func (s *repos) Get(ctx context.Context, repo api.RepoID) (_ *types.Repo, err er
 	ctx, done := trace(ctx, "Repos", "Get", repo, &err)
 	defer done()
 
-	return db.Repos.Get(ctx, repo)
+	return s.store.Get(ctx, repo)
 }
 
 // GetByName retrieves the repository with the given name. On sourcegraph.com,
@@ -63,17 +67,18 @@ func (s *repos) GetByName(ctx context.Context, name api.RepoName) (_ *types.Repo
 	ctx, done := trace(ctx, "Repos", "GetByName", name, &err)
 	defer done()
 
-	switch repo, err := db.Repos.GetByName(ctx, name); {
+	switch repo, err := s.store.GetByName(ctx, name); {
 	case err == nil:
 		return repo, nil
 	case !errcode.IsNotFound(err):
 		return nil, err
 	case envvar.SourcegraphDotComMode():
 		// Automatically add repositories on Sourcegraph.com.
-		if err := s.Add(ctx, name); err != nil {
+		newName, err := s.Add(ctx, name)
+		if err != nil {
 			return nil, err
 		}
-		return db.Repos.GetByName(ctx, name)
+		return s.store.GetByName(ctx, newName)
 	case shouldRedirect(name):
 		return nil, ErrRepoSeeOther{RedirectURL: (&url.URL{
 			Scheme:   "https",
@@ -97,8 +102,9 @@ var metricIsRepoCloneable = promauto.NewCounterVec(prometheus.CounterOpts{
 }, []string{"status"})
 
 // Add adds the repository with the given name to the database by calling
-// repo-updater when in sourcegraph.com mode.
-func (s *repos) Add(ctx context.Context, name api.RepoName) (err error) {
+// repo-updater when in sourcegraph.com mode. It's possible that the repo has
+// been renamed on the code host in which case a different name may be returned.
+func (s *repos) Add(ctx context.Context, name api.RepoName) (addedName api.RepoName, err error) {
 	ctx, done := trace(ctx, "Repos", "Add", name, &err)
 	defer done()
 
@@ -117,18 +123,21 @@ func (s *repos) Add(ctx context.Context, name api.RepoName) (err error) {
 			} else {
 				status = "fail"
 			}
-			return err
+			return "", err
 		}
 		status = "success"
 	}
 
 	// Looking up the repo in repo-updater makes it sync that repo to the
 	// database on sourcegraph.com if that repo is from github.com or gitlab.com
-	_, err = repoupdater.DefaultClient.RepoLookup(ctx, protocol.RepoLookupArgs{Repo: name})
-	return err
+	lookupResult, err := repoupdater.DefaultClient.RepoLookup(ctx, protocol.RepoLookupArgs{Repo: name})
+	if lookupResult != nil && lookupResult.Repo != nil {
+		return lookupResult.Repo.Name, err
+	}
+	return "", err
 }
 
-func (s *repos) List(ctx context.Context, opt db.ReposListOptions) (repos []*types.Repo, err error) {
+func (s *repos) List(ctx context.Context, opt database.ReposListOptions) (repos []*types.Repo, err error) {
 	if Mocks.Repos.List != nil {
 		return Mocks.Repos.List(ctx, opt)
 	}
@@ -142,11 +151,11 @@ func (s *repos) List(ctx context.Context, opt db.ReposListOptions) (repos []*typ
 		done()
 	}()
 
-	return db.Repos.List(ctx, opt)
+	return s.store.List(ctx, opt)
 }
 
-// ListDefault calls db.DefaultRepos.List, with tracing.
-func (s *repos) ListDefault(ctx context.Context) (repos []*types.RepoName, err error) {
+// ListDefault calls database.DefaultRepos.List, with tracing.
+func (s *repos) ListDefault(ctx context.Context) (repos []types.RepoName, err error) {
 	ctx, done := trace(ctx, "Repos", "ListDefault", nil, &err)
 	defer func() {
 		if err == nil {
@@ -155,7 +164,7 @@ func (s *repos) ListDefault(ctx context.Context) (repos []*types.RepoName, err e
 		}
 		done()
 	}()
-	return db.DefaultRepos.List(ctx)
+	return database.GlobalDefaultRepos.List(ctx)
 }
 
 func (s *repos) GetInventory(ctx context.Context, repo *types.Repo, commitID api.CommitID, forceEnhancedLanguageDetection bool) (res *inventory.Inventory, err error) {

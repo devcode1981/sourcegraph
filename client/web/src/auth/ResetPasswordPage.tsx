@@ -1,16 +1,19 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import * as H from 'history'
 import * as React from 'react'
 import { Link, RouteComponentProps } from 'react-router-dom'
-import { asError, ErrorLike, isErrorLike } from '../../../shared/src/util/errors'
-import { Form } from '../../../branded/src/components/Form'
+
+import { Form } from '@sourcegraph/branded/src/components/Form'
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { asError, ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+
+import { AuthenticatedUser } from '../auth'
+import { ErrorAlert } from '../components/alerts'
 import { HeroPage } from '../components/HeroPage'
 import { PageTitle } from '../components/PageTitle'
 import { eventLogger } from '../tracking/eventLogger'
-import { PasswordInput } from './SignInSignUpCommon'
-import { ErrorAlert } from '../components/alerts'
-import * as H from 'history'
-import { AuthenticatedUser } from '../auth'
+
 import { SourcegraphIcon } from './icons'
+import { PasswordInput } from './SignInSignUpCommon'
 
 interface ResetPasswordInitFormState {
     /** The user's email input value. */
@@ -54,7 +57,7 @@ class ResetPasswordInitForm extends React.PureComponent<ResetPasswordInitFormPro
         return (
             <>
                 {isErrorLike(this.state.submitOrError) && (
-                    <ErrorAlert className="mt-2" error={this.state.submitOrError} history={this.props.history} />
+                    <ErrorAlert className="mt-2" error={this.state.submitOrError} />
                 )}
                 <Form
                     className="reset-password-page__form signin-signup-form border rounded p-4 mb-3"
@@ -168,7 +171,7 @@ class ResetPasswordCodeForm extends React.PureComponent<ResetPasswordCodeFormPro
         return (
             <>
                 {isErrorLike(this.state.submitOrError) && (
-                    <ErrorAlert className="mt-2" error={this.state.submitOrError} history={this.props.history} />
+                    <ErrorAlert className="mt-2" error={this.state.submitOrError} />
                 )}
                 <Form
                     className="reset-password-page__form signin-signup-form border rounded p-4 mb-3"

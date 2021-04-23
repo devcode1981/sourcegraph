@@ -1,5 +1,5 @@
-import * as React from 'react'
 import classnames from 'classnames'
+import * as React from 'react'
 
 interface Props {
     /** The initial value. */
@@ -13,10 +13,14 @@ interface Props {
      */
     onToggle?: (value: boolean) => void
 
+    onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void
+
     /** The title attribute (tooltip). */
     title?: string
 
-    ariaLabel?: string
+    'aria-label'?: string
+    'aria-labelledby'?: string
+    'aria-describedby'?: string
 
     disabled?: boolean
     tabIndex?: number
@@ -35,12 +39,19 @@ export const Toggle: React.FunctionComponent<Props> = ({
     value,
     tabIndex,
     onToggle,
+    onClick,
     dataTest,
-    ariaLabel,
+    'aria-label': ariaLabel,
+    'aria-labelledby': ariaLabelledby,
+    'aria-describedby': ariaDescribedby,
 }) => {
-    function onClick(): void {
+    function onButtonClick(event: React.MouseEvent<HTMLButtonElement>): void {
+        event.stopPropagation()
         if (!disabled && onToggle) {
             onToggle(!value)
+        }
+        if (!disabled && onClick) {
+            onClick(event)
         }
     }
 
@@ -51,12 +62,14 @@ export const Toggle: React.FunctionComponent<Props> = ({
             id={id}
             title={title}
             value={value ? 1 : 0}
-            onClick={onClick}
+            onClick={onButtonClick}
             tabIndex={tabIndex}
             disabled={disabled}
             role="switch"
             aria-checked={value}
             aria-label={ariaLabel}
+            aria-labelledby={ariaLabelledby}
+            aria-describedby={ariaDescribedby}
             data-test={dataTest}
         >
             <span

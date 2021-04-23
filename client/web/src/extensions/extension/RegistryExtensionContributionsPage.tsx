@@ -1,16 +1,19 @@
+import * as H from 'history'
 import * as React from 'react'
 import { RouteComponentProps } from 'react-router'
-import { ContributableMenu } from '../../../../shared/src/api/protocol'
-import { ExtensionManifest } from '../../../../shared/src/schema/extensionSchema'
-import { asError, ErrorLike, isErrorLike } from '../../../../shared/src/util/errors'
+
+import { ContributableMenu } from '@sourcegraph/shared/src/api/protocol'
+import { ExtensionManifest } from '@sourcegraph/shared/src/schema/extensionSchema'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { asError, ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { hasProperty } from '@sourcegraph/shared/src/util/types'
+
+import { ErrorAlert } from '../../components/alerts'
 import { PageTitle } from '../../components/PageTitle'
 import { eventLogger } from '../../tracking/eventLogger'
+
 import { ExtensionAreaRouteContext } from './ExtensionArea'
 import { ExtensionNoManifestAlert } from './RegistryExtensionManifestPage'
-import { ThemeProps } from '../../../../shared/src/theme'
-import { ErrorAlert } from '../../components/alerts'
-import { hasProperty } from '../../../../shared/src/util/types'
-import * as H from 'history'
 
 interface Props extends ExtensionAreaRouteContext, RouteComponentProps<{}>, ThemeProps {
     history: H.History
@@ -38,7 +41,7 @@ const ContributionsTable: React.FunctionComponent<{ contributionGroups: Contribu
                         <h3>
                             {group.title} ({group.rows.length})
                         </h3>
-                        {group.error && <ErrorAlert className="mt-1" error={group.error} history={history} />}
+                        {group.error && <ErrorAlert className="mt-1" error={group.error} />}
                         <table className="table mb-5">
                             <thead>
                                 <tr>
@@ -159,11 +162,7 @@ export class RegistryExtensionContributionsPage extends React.PureComponent<Prop
                     {this.props.extension.manifest === null ? (
                         <ExtensionNoManifestAlert extension={this.props.extension} />
                     ) : isErrorLike(this.props.extension.manifest) ? (
-                        <ErrorAlert
-                            error={this.props.extension.manifest}
-                            prefix="Error parsing extension manifest"
-                            history={this.props.history}
-                        />
+                        <ErrorAlert error={this.props.extension.manifest} prefix="Error parsing extension manifest" />
                     ) : (
                         <ContributionsTable
                             contributionGroups={toContributionsGroups(this.props.extension.manifest)}

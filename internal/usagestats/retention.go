@@ -5,11 +5,13 @@ import (
 
 	"github.com/keegancsmith/sqlf"
 
-	"github.com/sourcegraph/sourcegraph/internal/db/dbconn"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 )
 
-func GetRetentionStatistics(ctx context.Context) (*types.RetentionStats, error) {
+func GetRetentionStatistics(ctx context.Context, db dbutil.DB) (*types.RetentionStats, error) {
+	weekAgo := timeNow().AddDate(0, 0, -7)
+
 	weeklyRetentionQuery := sqlf.Sprintf(`
 		WITH
 			dates AS (
@@ -61,9 +63,9 @@ func GetRetentionStatistics(ctx context.Context) (*types.RetentionStats, error) 
 		LEFT JOIN sub     ON dates.week_start_date = sub.cohort_date
 		GROUP BY week, cohorts.cohort_size
 		ORDER BY week DESC;
-		`, timeNow(), timeNow(), timeNow(), timeNow())
+		`, weekAgo, weekAgo, weekAgo, weekAgo)
 
-	rows, err := dbconn.Global.QueryContext(ctx, weeklyRetentionQuery.Query(sqlf.PostgresBindVar), weeklyRetentionQuery.Args()...)
+	rows, err := db.QueryContext(ctx, weeklyRetentionQuery.Query(sqlf.PostgresBindVar), weeklyRetentionQuery.Args()...)
 	if err != nil {
 		return nil, err
 	}

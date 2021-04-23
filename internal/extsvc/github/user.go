@@ -5,8 +5,9 @@ import (
 	"fmt"
 
 	"github.com/google/go-github/github"
-	"github.com/sourcegraph/sourcegraph/internal/extsvc"
 	"golang.org/x/oauth2"
+
+	"github.com/sourcegraph/sourcegraph/internal/extsvc"
 )
 
 func GetExternalAccountData(data *extsvc.AccountData) (usr *github.User, tok *oauth2.Token, err error) {
@@ -35,6 +36,12 @@ func SetExternalAccountData(data *extsvc.AccountData, user *github.User, token *
 	data.SetAuthData(token)
 }
 
+type User struct {
+	Login  string `json:"login,omitempty"`
+	ID     int    `json:"id,omitempty"`
+	NodeID string `json:"node_id,omitempty"`
+}
+
 type UserEmail struct {
 	Email      string `json:"email,omitempty"`
 	Primary    bool   `json:"primary,omitempty"`
@@ -43,6 +50,32 @@ type UserEmail struct {
 }
 
 var MockGetAuthenticatedUserEmails func(ctx context.Context) ([]*UserEmail, error)
+
+func (c *V3Client) GetAuthenticatedUser(ctx context.Context) (*User, error) {
+	var u User
+	err := c.requestGet(ctx, "/user", &u)
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (c *V4Client) GetAuthenticatedUser(ctx context.Context) (*Actor, error) {
+	var result struct {
+		Viewer Actor `json:"viewer"`
+	}
+	err := c.requestGraphQL(ctx, `query GetAuthenticatedUser {
+    viewer {
+        login
+        avatarUrl
+        url
+    }
+}`, nil, &result)
+	if err != nil {
+		return nil, err
+	}
+	return &result.Viewer, nil
+}
 
 // GetAuthenticatedUserEmails returns the first 100 emails associated with the currently
 // authenticated user.

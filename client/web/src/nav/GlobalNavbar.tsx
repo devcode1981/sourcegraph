@@ -1,37 +1,44 @@
 import * as H from 'history'
 import React, { useEffect, useMemo } from 'react'
-import { ActivationProps } from '../../../shared/src/components/activation/Activation'
-import { ExtensionsControllerProps } from '../../../shared/src/extensions/controller'
-import { PlatformContextProps } from '../../../shared/src/platform/context'
-import { SettingsCascadeProps } from '../../../shared/src/settings/settings'
+import { of } from 'rxjs'
+import { startWith } from 'rxjs/operators'
+
+import { ActivationProps } from '@sourcegraph/shared/src/components/activation/Activation'
+import { Link } from '@sourcegraph/shared/src/components/Link'
+import { LinkOrSpan } from '@sourcegraph/shared/src/components/LinkOrSpan'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { omitFilter } from '@sourcegraph/shared/src/search/query/transformer'
+import { VersionContextProps } from '@sourcegraph/shared/src/search/util'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
+
 import { AuthenticatedUser } from '../auth'
+import { CodeMonitoringProps } from '../code-monitoring'
+import { BrandLogo } from '../components/branding/BrandLogo'
+import { KeyboardShortcutsProps } from '../keyboardShortcuts/keyboardShortcuts'
+import { LayoutRouteProps } from '../routes'
+import { VersionContext } from '../schema/site.schema'
 import {
-    parseSearchURLQuery,
     PatternTypeProps,
-    InteractiveSearchProps,
     CaseSensitivityProps,
     CopyQueryButtonProps,
     OnboardingTourProps,
+    ParsedSearchQueryProps,
+    SearchContextProps,
+    isSearchContextSpecAvailable,
+    getGlobalSearchContextFilter,
 } from '../search'
-import { SearchNavbarItem } from '../search/input/SearchNavbarItem'
-import { showDotComMarketing } from '../util/features'
-import { NavLinks } from './NavLinks'
-import { ThemeProps } from '../../../shared/src/theme'
-import { ThemePreferenceProps } from '../theme'
-import { KeyboardShortcutsProps } from '../keyboardShortcuts/keyboardShortcuts'
 import { QueryState } from '../search/helpers'
-import { InteractiveModeInput } from '../search/input/interactive/InteractiveModeInput'
-import { FiltersToTypeAndValue } from '../../../shared/src/search/interactive/util'
-import { SearchModeToggle } from '../search/input/interactive/SearchModeToggle'
-import { Link } from '../../../shared/src/components/Link'
-import { convertPlainTextToInteractiveQuery } from '../search/input/helpers'
-import { VersionContextDropdown } from './VersionContextDropdown'
-import { VersionContextProps } from '../../../shared/src/search/util'
-import { VersionContext } from '../schema/site.schema'
-import { TelemetryProps } from '../../../shared/src/telemetry/telemetryService'
-import { BrandLogo } from '../components/branding/BrandLogo'
-import { LinkOrSpan } from '../../../shared/src/components/LinkOrSpan'
+import { SearchNavbarItem } from '../search/input/SearchNavbarItem'
+import { ThemePreferenceProps } from '../theme'
+import { showDotComMarketing } from '../util/features'
+
+import { NavLinks } from './NavLinks'
 import { ExtensionAlertAnimationProps } from './UserNavItem'
+import { VersionContextDropdown } from './VersionContextDropdown'
 
 interface Props
     extends SettingsCascadeProps,
@@ -43,11 +50,13 @@ interface Props
         ThemePreferenceProps,
         ExtensionAlertAnimationProps,
         ActivationProps,
+        Pick<ParsedSearchQueryProps, 'parsedSearchQuery'>,
         PatternTypeProps,
         CaseSensitivityProps,
-        InteractiveSearchProps,
         CopyQueryButtonProps,
         VersionContextProps,
+        SearchContextProps,
+        CodeMonitoringProps,
         OnboardingTourProps {
     history: H.History
     location: H.Location<{ query: string }>
@@ -57,7 +66,8 @@ interface Props
     onNavbarQueryChange: (queryState: QueryState) => void
     isSourcegraphDotCom: boolean
     isSearchRelatedPage: boolean
-    showCampaigns: boolean
+    showBatchChanges: boolean
+    routes: readonly LayoutRouteProps<{}>[]
 
     // Whether globbing is enabled for filters.
     globbing: boolean
@@ -75,13 +85,11 @@ interface Props
      */
     variant: 'default' | 'low-profile' | 'low-profile-with-logo' | 'no-search-input'
 
-    splitSearchModes: boolean
-    interactiveSearchMode: boolean
-    toggleSearchMode: (event: React.MouseEvent<HTMLAnchorElement>) => void
-    setVersionContext: (versionContext: string | undefined) => void
+    setVersionContext: (versionContext: string | undefined) => Promise<void>
     availableVersionContexts: VersionContext[] | undefined
 
     minimalNavLinks?: boolean
+    isSearchAutoFocusRequired?: boolean
     branding?: typeof window.context.branding
 
     /** For testing only. Used because reactstrap's Popover is incompatible with react-test-renderer. */
@@ -91,8 +99,6 @@ interface Props
 export const GlobalNavbar: React.FunctionComponent<Props> = ({
     authRequired,
     isSearchRelatedPage,
-    splitSearchModes,
-    interactiveSearchMode,
     navbarSearchQueryState,
     versionContext,
     setVersionContext,
@@ -100,7 +106,6 @@ export const GlobalNavbar: React.FunctionComponent<Props> = ({
     caseSensitive,
     patternType,
     onNavbarQueryChange,
-    onFiltersInQueryChange,
     hideNavLinks,
     variant,
     isLightTheme,
@@ -113,32 +118,52 @@ export const GlobalNavbar: React.FunctionComponent<Props> = ({
     // Workaround: can't put this in optional parameter value because of https://github.com/babel/babel/issues/11166
     branding = branding ?? window.context?.branding
 
-    const query = useMemo(() => parseSearchURLQuery(location.search || ''), [location.search])
+    const query = props.parsedSearchQuery
+
+    const globalSearchContextSpec = useMemo(() => getGlobalSearchContextFilter(query), [query])
+    const isSearchContextAvailable = useObservable(
+        useMemo(
+            () =>
+                globalSearchContextSpec
+                    ? // While we wait for the result of the `isSearchContextSpecAvailable` call, we assume the context is available
+                      // to prevent flashing and moving content in the query bar. This optimizes for the most common use case where
+                      // user selects a search context from the dropdown.
+                      // See https://github.com/sourcegraph/sourcegraph/issues/19918 for more info.
+                      isSearchContextSpecAvailable(globalSearchContextSpec.spec).pipe(startWith(true))
+                    : of(false),
+            [globalSearchContextSpec]
+        )
+    )
 
     useEffect(() => {
         // On a non-search related page or non-repo page, we clear the query in
-        // the main query input and interactive mode UI to avoid misleading users
+        // the main query input to avoid misleading users
         // that the query is relevant in any way on those pages.
         if (!isSearchRelatedPage) {
-            onNavbarQueryChange({ query: '', cursorPosition: 0 })
-            onFiltersInQueryChange({})
+            onNavbarQueryChange({ query: '' })
             return
         }
         // Do nothing if there is no query in the URL
         if (!query) {
             return
         }
-        // If the URL contains a query, update the query state to reflect it
-        if (interactiveSearchMode) {
-            let filtersInQuery: FiltersToTypeAndValue = {}
-            const { filtersInQuery: newFiltersInQuery, navbarQuery } = convertPlainTextToInteractiveQuery(query)
-            filtersInQuery = { ...filtersInQuery, ...newFiltersInQuery }
-            onNavbarQueryChange({ query: navbarQuery, cursorPosition: navbarQuery.length })
-            onFiltersInQueryChange(filtersInQuery)
-        } else {
-            onNavbarQueryChange({ query, cursorPosition: query.length })
-        }
-    }, [interactiveSearchMode, isSearchRelatedPage, onFiltersInQueryChange, onNavbarQueryChange, query])
+
+        // If a global search context spec is available to the user, we omit it from the
+        // query and move it to the search contexts dropdown
+        const finalQuery =
+            globalSearchContextSpec && isSearchContextAvailable && props.showSearchContext
+                ? omitFilter(query, globalSearchContextSpec.filter)
+                : query
+
+        onNavbarQueryChange({ query: finalQuery })
+    }, [
+        isSearchRelatedPage,
+        onNavbarQueryChange,
+        query,
+        globalSearchContextSpec,
+        isSearchContextAvailable,
+        props.showSearchContext,
+    ])
 
     const logo = (
         <LinkOrSpan to={authRequired ? undefined : '/search'} className="global-navbar__logo-link">
@@ -190,27 +215,8 @@ export const GlobalNavbar: React.FunctionComponent<Props> = ({
                     {logo}
                     {authRequired ? (
                         <div className="flex-1" />
-                    ) : splitSearchModes && interactiveSearchMode ? (
-                        <InteractiveModeInput
-                            {...props}
-                            navbarSearchState={navbarSearchQueryState}
-                            onNavbarQueryChange={onNavbarQueryChange}
-                            lowProfile={!isSearchRelatedPage}
-                            versionContext={versionContext}
-                            location={location}
-                            history={history}
-                            setVersionContext={setVersionContext}
-                            availableVersionContexts={availableVersionContexts}
-                            isLightTheme={isLightTheme}
-                            patternType={patternType}
-                            caseSensitive={caseSensitive}
-                            onFiltersInQueryChange={onFiltersInQueryChange}
-                        />
                     ) : (
                         <div className="global-navbar__search-box-container d-none d-sm-flex flex-row">
-                            {splitSearchModes && (
-                                <SearchModeToggle {...props} interactiveSearchMode={interactiveSearchMode} />
-                            )}
                             <VersionContextDropdown
                                 history={history}
                                 navbarSearchQuery={navbarSearchQueryState.query}
@@ -219,6 +225,7 @@ export const GlobalNavbar: React.FunctionComponent<Props> = ({
                                 versionContext={versionContext}
                                 setVersionContext={setVersionContext}
                                 availableVersionContexts={availableVersionContexts}
+                                selectedSearchContextSpec={props.selectedSearchContextSpec}
                             />
                             <SearchNavbarItem
                                 {...props}

@@ -1,15 +1,17 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import React, { useCallback, useMemo } from 'react'
 import { Observable } from 'rxjs'
 import { catchError, map, startWith, tap } from 'rxjs/operators'
-import { gql } from '../../../../../shared/src/graphql/graphql'
-import * as GQL from '../../../../../shared/src/graphql/schema'
-import { asError, createAggregateError, isErrorLike } from '../../../../../shared/src/util/errors'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { gql } from '@sourcegraph/shared/src/graphql/graphql'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { asError, createAggregateError, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
+
 import { queryGraphQL } from '../../../backend/graphql'
-import { ProductPlanPrice } from './ProductPlanPrice'
 import { ErrorAlert } from '../../../components/alerts'
-import { useObservable } from '../../../../../shared/src/util/useObservable'
-import * as H from 'history'
+
+import { ProductPlanPrice } from './ProductPlanPrice'
 
 interface Props {
     /** The selected plan's billing ID. */
@@ -20,7 +22,6 @@ interface Props {
 
     disabled?: boolean
     className?: string
-    history: H.History
 
     /** For mocking in tests only. */
     _queryProductPlans?: typeof queryProductPlans
@@ -36,7 +37,6 @@ export const ProductPlanFormControl: React.FunctionComponent<Props> = ({
     onChange,
     disabled,
     className = '',
-    history,
     _queryProductPlans = queryProductPlans,
 }) => {
     const noPlanSelected = value === null // don't recompute observable below on every value change
@@ -76,7 +76,7 @@ export const ProductPlanFormControl: React.FunctionComponent<Props> = ({
             {plans === LOADING ? (
                 <LoadingSpinner className="icon-inline" />
             ) : isErrorLike(plans) ? (
-                <ErrorAlert error={plans.message} history={history} />
+                <ErrorAlert error={plans.message} />
             ) : (
                 <>
                     <div className="list-group">

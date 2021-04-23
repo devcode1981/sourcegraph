@@ -1,23 +1,23 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import * as React from 'react'
 import { RouteComponentProps } from 'react-router'
 import { Link } from 'react-router-dom'
 import { Subject, Subscription } from 'rxjs'
 import { catchError, filter, mergeMap, tap } from 'rxjs/operators'
+
+import { Form } from '@sourcegraph/branded/src/components/Form'
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+
+import { AuthenticatedUser } from '../../../auth'
 import { PasswordInput } from '../../../auth/SignInSignUpCommon'
-import { Form } from '../../../../../branded/src/components/Form'
+import { ErrorAlert } from '../../../components/alerts'
 import { PageTitle } from '../../../components/PageTitle'
+import { UserAreaUserFields } from '../../../graphql-operations'
 import { eventLogger } from '../../../tracking/eventLogger'
 import { updatePassword } from '../backend'
-import { ErrorAlert } from '../../../components/alerts'
-import * as H from 'history'
-import { AuthenticatedUser } from '../../../auth'
-import { UserAreaUserFields } from '../../../graphql-operations'
 
 interface Props extends RouteComponentProps<{}> {
     user: UserAreaUserFields
     authenticatedUser: AuthenticatedUser
-    history: H.History
 }
 
 interface State {
@@ -102,9 +102,7 @@ export class UserSettingsPasswordPage extends React.Component<Props, State> {
                     </div>
                 ) : (
                     <>
-                        {this.state.error && (
-                            <ErrorAlert className="mb-3" error={this.state.error} history={this.props.history} />
-                        )}
+                        {this.state.error && <ErrorAlert className="mb-3" error={this.state.error} />}
                         {this.state.saved && <div className="alert alert-success mb-3">Password changed!</div>}
                         <Form onSubmit={this.handleSubmit}>
                             {/* Include a username field as a hint for password managers to update the saved password. */}
@@ -117,34 +115,42 @@ export class UserSettingsPasswordPage extends React.Component<Props, State> {
                                 hidden={true}
                             />
                             <div className="form-group">
-                                <label>Old password</label>
+                                <label htmlFor="oldPassword">Old password</label>
                                 <PasswordInput
                                     value={this.state.oldPassword}
                                     onChange={this.onOldPasswordFieldChange}
                                     disabled={this.state.loading}
+                                    id="oldPassword"
                                     name="oldPassword"
+                                    aria-label="old password"
                                     placeholder=" "
                                     autoComplete="current-password"
                                 />
                             </div>
+
                             <div className="form-group">
-                                <label>New password</label>
+                                <label htmlFor="newPassword">New password</label>
                                 <PasswordInput
                                     value={this.state.newPassword}
                                     onChange={this.onNewPasswordFieldChange}
                                     disabled={this.state.loading}
+                                    id="newPassword"
                                     name="newPassword"
+                                    aria-label="new password"
                                     placeholder=" "
                                     autoComplete="new-password"
                                 />
+                                <small className="form-help text-muted">At least 12 characters</small>
                             </div>
                             <div className="form-group">
-                                <label>Confirm new password</label>
+                                <label htmlFor="newPasswordConfirmation">Confirm new password</label>
                                 <PasswordInput
                                     value={this.state.newPasswordConfirmation}
                                     onChange={this.onNewPasswordConfirmationFieldChange}
                                     disabled={this.state.loading}
+                                    id="newPasswordConfirmation"
                                     name="newPasswordConfirmation"
+                                    aria-label="new password confirmation"
                                     placeholder=" "
                                     inputRef={this.setNewPasswordConfirmationField}
                                     autoComplete="new-password"

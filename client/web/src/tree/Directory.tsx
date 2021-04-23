@@ -1,9 +1,11 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import ChevronDownIcon from 'mdi-react/ChevronDownIcon'
 import ChevronRightIcon from 'mdi-react/ChevronRightIcon'
 import * as React from 'react'
 import { Link } from 'react-router-dom'
 import { FileDecoration } from 'sourcegraph'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+
 import { FileDecorator } from './FileDecorator'
 import { TreeLayerProps } from './TreeLayer'
 import { treePadding } from './util'
@@ -34,7 +36,7 @@ export const Directory: React.FunctionComponent<TreeChildProps> = (props: TreeCh
                 data-tree-is-directory="true"
                 data-tree-path={props.entryInfo.path}
             >
-                <div className="tree__row-contents-text">
+                <div className="tree__row-contents-text flex-1 justify-between">
                     <div className="d-flex">
                         <a
                             // needed because of dynamic styling

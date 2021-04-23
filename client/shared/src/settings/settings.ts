@@ -1,4 +1,5 @@
 import { cloneDeep, isFunction } from 'lodash'
+
 import * as GQL from '../graphql/schema'
 import { createAggregateError, ErrorLike, isErrorLike } from '../util/errors'
 import { parseJSONCOrError } from '../util/jsonc'
@@ -19,7 +20,6 @@ export interface IClient {
 export interface Settings {
     extensions?: { [extensionID: string]: boolean }
     experimentalFeatures?: {
-        showBadgeAttachments?: boolean
         enableFastResultLoading?: boolean
     }
     [key: string]: any

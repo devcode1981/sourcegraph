@@ -1,55 +1,35 @@
-import React, { useMemo } from 'react'
-import { ExtensionsControllerProps } from '../../../shared/src/extensions/controller'
-import { PageTitle } from '../components/PageTitle'
 import * as H from 'history'
-import { ContributableViewContainer } from '../../../shared/src/api/protocol'
+import React, { useMemo } from 'react'
+import { Observable } from 'rxjs'
+import { View } from 'sourcegraph'
+
 import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
-import { getView } from '../../../shared/src/api/client/services/viewService'
-import { useObservable } from '../../../shared/src/util/useObservable'
+import { useObservable } from '@sourcegraph/shared/src/util/useObservable'
+
+import { PageTitle } from '../components/PageTitle'
+
 import { ViewContentProps, ViewContent } from './ViewContent'
 
-interface Props extends ExtensionsControllerProps<'services'>, Omit<ViewContentProps, 'viewContent'> {
+interface Props extends Omit<ViewContentProps, 'viewContent' | 'containerClassName'> {
     viewID: string
     extraPath: string
+    getViewForID: (id: string, queryParameters: Record<string, string>) => Observable<View | null | undefined>
 
     location: H.Location
     history: H.History
-
-    /** For mocking in tests. */
-    _getView?: typeof getView
 }
 
 /**
  * A page that displays a single view (contributed by an extension) as a standalone page.
  */
-export const ViewPage: React.FunctionComponent<Props> = ({
-    viewID,
-    extraPath,
-    location,
-    extensionsController,
-    _getView = getView,
-    ...props
-}) => {
+export const ViewPage: React.FunctionComponent<Props> = ({ viewID, extraPath, location, getViewForID, ...props }) => {
     const queryParameters = useMemo<Record<string, string>>(
         () => ({ ...Object.fromEntries(new URLSearchParams(location.search).entries()), extraPath }),
         [extraPath, location.search]
     )
 
-    const contributions = useMemo(() => extensionsController.services.contribution.getContributions(), [
-        extensionsController.services.contribution,
-    ])
     const view = useObservable(
-        useMemo(
-            () =>
-                _getView(
-                    viewID,
-                    ContributableViewContainer.GlobalPage,
-                    queryParameters,
-                    contributions,
-                    extensionsController.services.view
-                ),
-            [_getView, contributions, extensionsController.services.view, queryParameters, viewID]
-        )
+        useMemo(() => getViewForID(viewID, queryParameters), [queryParameters, viewID, getViewForID])
     )
 
     if (view === undefined) {
@@ -68,7 +48,7 @@ export const ViewPage: React.FunctionComponent<Props> = ({
         <div>
             <PageTitle title={view.title || 'View'} />
             {view.title && <h1>{view.title}</h1>}
-            <ViewContent viewContent={view.content} location={location} {...props} />
+            <ViewContent viewID={viewID} viewContent={view.content} location={location} {...props} />
         </div>
     )
 }

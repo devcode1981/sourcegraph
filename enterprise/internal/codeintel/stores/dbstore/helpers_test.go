@@ -15,9 +15,10 @@ import (
 
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/commitgraph"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/stores/lsifstore"
-	"github.com/sourcegraph/sourcegraph/internal/db/basestore"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbconn"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbutil"
+	"github.com/sourcegraph/sourcegraph/enterprise/lib/codeintel/semantic"
+	"github.com/sourcegraph/sourcegraph/internal/database/basestore"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbconn"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	dbworkerstore "github.com/sourcegraph/sourcegraph/internal/workerutil/dbworker/store"
 )
 
@@ -28,15 +29,6 @@ func (r printableRank) String() string {
 		return "nil"
 	}
 	return strconv.Itoa(*r.value)
-}
-
-type printableTime struct{ value *time.Time }
-
-func (r printableTime) String() string {
-	if r.value == nil {
-		return "nil"
-	}
-	return fmt.Sprintf("%v", *r.value)
 }
 
 // makeCommit formats an integer as a 40-character git commit hash.
@@ -83,8 +75,9 @@ func insertUploads(t testing.TB, db *sql.DB, uploads ...Upload) {
 				indexer,
 				num_parts,
 				uploaded_parts,
-				upload_size
-			) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+				upload_size,
+				associated_index_id
+			) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 		`,
 			upload.ID,
 			upload.Commit,
@@ -102,6 +95,7 @@ func insertUploads(t testing.TB, db *sql.DB, uploads ...Upload) {
 			upload.NumParts,
 			pq.Array(upload.UploadedParts),
 			upload.UploadSize,
+			upload.AssociatedIndexID,
 		)
 
 		if _, err := db.ExecContext(context.Background(), query.Query(sqlf.PostgresBindVar), query.Args()...); err != nil {
@@ -200,10 +194,31 @@ func insertRepo(t testing.TB, db *sql.DB, id int, name string) {
 	}
 }
 
+// Marks a repo as deleted
+func deleteRepo(t testing.TB, db *sql.DB, id int, deleted_at time.Time) {
+	query := sqlf.Sprintf(
+		`UPDATE repo SET deleted_at = %s WHERE id = %s`,
+		deleted_at,
+		id,
+	)
+	if _, err := db.ExecContext(context.Background(), query.Query(sqlf.PostgresBindVar), query.Args()...); err != nil {
+		t.Fatalf("unexpected error while deleting repository: %s", err)
+	}
+}
+
 // insertPackageReferences populates the lsif_references table with the given package references.
 func insertPackageReferences(t testing.TB, store *Store, packageReferences []lsifstore.PackageReference) {
-	if err := store.UpdatePackageReferences(context.Background(), packageReferences); err != nil {
-		t.Fatalf("unexpected error updating package references: %s", err)
+	for _, packageReference := range packageReferences {
+		if err := store.UpdatePackageReferences(context.Background(), packageReference.DumpID, []semantic.PackageReference{
+			{
+				Scheme:  packageReference.Scheme,
+				Name:    packageReference.Name,
+				Version: packageReference.Version,
+				Filter:  packageReference.Filter,
+			},
+		}); err != nil {
+			t.Fatalf("unexpected error updating package references: %s", err)
+		}
 	}
 }
 
@@ -289,30 +304,6 @@ func toCommitGraphView(uploads []Upload) *commitgraph.CommitGraphView {
 	return commitGraphView
 }
 
-func scanVisibleUploads(rows *sql.Rows, queryErr error) (_ map[string][]commitgraph.UploadMeta, err error) {
-	if queryErr != nil {
-		return nil, queryErr
-	}
-	defer func() { err = basestore.CloseRows(rows, err) }()
-
-	uploadMeta := map[string][]commitgraph.UploadMeta{}
-	for rows.Next() {
-		var commit string
-		var uploadID int
-		var distance uint32
-		if err := rows.Scan(&commit, &uploadID, &distance); err != nil {
-			return nil, err
-		}
-
-		uploadMeta[commit] = append(uploadMeta[commit], commitgraph.UploadMeta{
-			UploadID: uploadID,
-			Distance: distance,
-		})
-	}
-
-	return uploadMeta, nil
-}
-
 func getVisibleUploads(t testing.TB, db *sql.DB, repositoryID int, commits []string) map[string][]int {
 	idsByCommit := map[string][]int{}
 	for _, commit := range commits {
@@ -390,4 +381,24 @@ func scanStates(rows *sql.Rows, queryErr error) (_ map[int]string, err error) {
 	}
 
 	return states, nil
+}
+
+func dumpToUpload(expected Dump) Upload {
+	return Upload{
+		ID:                expected.ID,
+		Commit:            expected.Commit,
+		Root:              expected.Root,
+		UploadedAt:        expected.UploadedAt,
+		State:             expected.State,
+		FailureMessage:    expected.FailureMessage,
+		StartedAt:         expected.StartedAt,
+		FinishedAt:        expected.FinishedAt,
+		ProcessAfter:      expected.ProcessAfter,
+		NumResets:         expected.NumResets,
+		NumFailures:       expected.NumFailures,
+		RepositoryID:      expected.RepositoryID,
+		RepositoryName:    expected.RepositoryName,
+		Indexer:           expected.Indexer,
+		AssociatedIndexID: expected.AssociatedIndexID,
+	}
 }

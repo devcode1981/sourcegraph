@@ -7,9 +7,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/sourcegraph/sourcegraph/internal/db"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbconn"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbtesting"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbtesting"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 )
 
@@ -24,9 +23,9 @@ func TestRetentionUsageStatistics(t *testing.T) {
 	userCreationDate := time.Date(2020, 10, 26, 0, 0, 0, 0, time.UTC)
 
 	mockTimeNow(eventDate)
-	dbtesting.SetupGlobalTestDB(t)
+	db := dbtesting.GetDB(t)
 
-	events := []db.Event{{
+	events := []database.Event{{
 		Name:      "ViewHome",
 		URL:       "https://sourcegraph.test:3443/search",
 		UserID:    1,
@@ -41,14 +40,14 @@ func TestRetentionUsageStatistics(t *testing.T) {
 	}}
 
 	for _, event := range events {
-		err := db.EventLogs.Insert(ctx, &event)
+		err := database.EventLogs(db).Insert(ctx, &event)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// Insert user
-	_, err := dbconn.Global.Exec(
+	_, err := db.Exec(
 		`INSERT INTO users(username, display_name, avatar_url, created_at, updated_at, passwd, invalidated_sessions_at, site_admin)
 		VALUES($1, $2, $3, $4, $5, $6, $7, $8)`,
 		"test", "test", nil, userCreationDate, userCreationDate, "foobar", userCreationDate, true)
@@ -56,7 +55,7 @@ func TestRetentionUsageStatistics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	have, err := GetRetentionStatistics(ctx)
+	have, err := GetRetentionStatistics(ctx, db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,22 +63,6 @@ func TestRetentionUsageStatistics(t *testing.T) {
 	oneFloat := float64(1)
 	zeroFloat := float64(0)
 	weekly := []*types.WeeklyRetentionStats{
-		{
-			WeekStart:  userCreationDate.Add(time.Hour * time.Duration(168)).UTC(),
-			CohortSize: nil,
-			Week0:      nil,
-			Week1:      nil,
-			Week2:      nil,
-			Week3:      nil,
-			Week4:      nil,
-			Week5:      nil,
-			Week6:      nil,
-			Week7:      nil,
-			Week8:      nil,
-			Week9:      nil,
-			Week10:     nil,
-			Week11:     nil,
-		},
 		{
 			WeekStart:  userCreationDate.UTC(),
 			CohortSize: &one,
@@ -98,7 +81,7 @@ func TestRetentionUsageStatistics(t *testing.T) {
 		},
 	}
 
-	for i := 1; i < 11; i++ {
+	for i := 1; i <= 11; i++ {
 		weekly = append(weekly, &types.WeeklyRetentionStats{
 			WeekStart:  userCreationDate.Add((time.Hour * time.Duration(168*i) * -1)).UTC(),
 			CohortSize: nil,

@@ -2,30 +2,30 @@ package lsifstore
 
 import (
 	"context"
-	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/keegancsmith/sqlf"
 	"github.com/opentracing/opentracing-go/log"
+
 	"github.com/sourcegraph/sourcegraph/internal/observation"
 )
 
 var tableNames = []string{
 	"lsif_data_metadata",
 	"lsif_data_documents",
+	"lsif_data_documents_schema_versions",
 	"lsif_data_result_chunks",
 	"lsif_data_definitions",
+	"lsif_data_definitions_schema_versions",
 	"lsif_data_references",
+	"lsif_data_references_schema_versions",
 }
 
 func (s *Store) Clear(ctx context.Context, bundleIDs ...int) (err error) {
-	var stringIDs []string
-	for _, bundleID := range bundleIDs {
-		stringIDs = append(stringIDs, fmt.Sprintf("%d", bundleID))
-	}
-
-	ctx, endObservation := s.operations.clear.With(ctx, &err, observation.Args{LogFields: []log.Field{
-		log.String("bundleIDs", strings.Join(stringIDs, ", ")),
+	ctx, traceLog, endObservation := s.operations.clear.WithAndLogger(ctx, &err, observation.Args{LogFields: []log.Field{
+		log.Int("numBundleIDs", len(bundleIDs)),
+		log.String("bundleIDs", intsToString(bundleIDs)),
 	}})
 	defer endObservation(1, observation.Args{})
 
@@ -47,10 +47,26 @@ func (s *Store) Clear(ctx context.Context, bundleIDs ...int) (err error) {
 	}()
 
 	for _, tableName := range tableNames {
-		if err := tx.Exec(ctx, sqlf.Sprintf(`DELETE FROM "`+tableName+`" WHERE dump_id IN (%s)`, sqlf.Join(ids, ","))); err != nil {
+		traceLog(log.String("tableName", tableName))
+
+		if err := tx.Exec(ctx, sqlf.Sprintf(clearQuery, sqlf.Sprintf(tableName), sqlf.Join(ids, ","))); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+const clearQuery = `
+-- source: enterprise/internal/codeintel/stores/lsifstore/clear.go:Clear
+DELETE FROM %s WHERE dump_id IN (%s)
+`
+
+func intsToString(vs []int) string {
+	strs := make([]string, 0, len(vs))
+	for _, v := range vs {
+		strs = append(strs, strconv.Itoa(v))
+	}
+
+	return strings.Join(strs, ", ")
 }

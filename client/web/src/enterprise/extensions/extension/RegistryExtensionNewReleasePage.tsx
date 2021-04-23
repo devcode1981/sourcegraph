@@ -1,29 +1,31 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import * as H from 'history'
+import CheckCircleIcon from 'mdi-react/CheckCircleIcon'
 import ErrorIcon from 'mdi-react/ErrorIcon'
 import React, { useCallback, useState } from 'react'
+import { of, Observable, concat, from } from 'rxjs'
 import { fromFetch } from 'rxjs/fetch'
 import { map, catchError, tap, concatMap } from 'rxjs/operators'
-import { ConfiguredRegistryExtension } from '../../../../../shared/src/extensions/extension'
-import { ExtensionManifest } from '../../../../../shared/src/extensions/extensionManifest'
-import { gql, dataOrThrowErrors } from '../../../../../shared/src/graphql/graphql'
-import * as GQL from '../../../../../shared/src/graphql/schema'
-import extensionSchemaJSON from '../../../../../shared/src/schema/extension.schema.json'
-import { asError, isErrorLike } from '../../../../../shared/src/util/errors'
+
+import { Form } from '@sourcegraph/branded/src/components/Form'
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { ConfiguredRegistryExtension } from '@sourcegraph/shared/src/extensions/extension'
+import { ExtensionManifest } from '@sourcegraph/shared/src/extensions/extensionManifest'
+import { gql, dataOrThrowErrors } from '@sourcegraph/shared/src/graphql/graphql'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import extensionSchemaJSON from '@sourcegraph/shared/src/schema/extension.schema.json'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { asError, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { useLocalStorage } from '@sourcegraph/shared/src/util/useLocalStorage'
+import { useEventObservable } from '@sourcegraph/shared/src/util/useObservable'
+
+import { AuthenticatedUser } from '../../../auth'
 import { withAuthenticatedUser } from '../../../auth/withAuthenticatedUser'
 import { mutateGraphQL } from '../../../backend/graphql'
-import { Form } from '../../../../../branded/src/components/Form'
+import { ErrorAlert } from '../../../components/alerts'
 import { HeroPage } from '../../../components/HeroPage'
 import { PageTitle } from '../../../components/PageTitle'
 import { DynamicallyImportedMonacoSettingsEditor } from '../../../settings/DynamicallyImportedMonacoSettingsEditor'
-import { useLocalStorage } from '../../../util/useLocalStorage'
-import { useEventObservable } from '../../../../../shared/src/util/useObservable'
-import { of, Observable, concat, from } from 'rxjs'
-import { ErrorAlert } from '../../../components/alerts'
-import CheckCircleIcon from 'mdi-react/CheckCircleIcon'
-import { TelemetryProps } from '../../../../../shared/src/telemetry/telemetryService'
-import { ThemeProps } from '../../../../../shared/src/theme'
-import { AuthenticatedUser } from '../../../auth'
 
 const publishExtension = (
     args: Pick<GQL.IPublishExtensionOnExtensionRegistryMutationArguments, 'extensionID' | 'manifest' | 'bundle'>
@@ -180,7 +182,7 @@ export const RegistryExtensionNewReleasePage = withAuthenticatedUser<Props>(
                                                 <LoadingSpinner className="icon-inline" />
                                             </div>
                                         ) : isErrorLike(bundleOrError) ? (
-                                            <ErrorAlert error={bundleOrError} history={history} />
+                                            <ErrorAlert error={bundleOrError} />
                                         ) : (
                                             <DynamicallyImportedMonacoSettingsEditor
                                                 id="registry-extension-new-release-page__bundle"
@@ -218,7 +220,7 @@ export const RegistryExtensionNewReleasePage = withAuthenticatedUser<Props>(
                                         </span>
                                     ))}
                             </div>
-                            {isErrorLike(updateOrError) && <ErrorAlert error={updateOrError} history={history} />}
+                            {isErrorLike(updateOrError) && <ErrorAlert error={updateOrError} />}
                         </Form>
                     </>
                 ) : (

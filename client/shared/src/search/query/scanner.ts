@@ -1,5 +1,7 @@
-import { filterTypeKeysWithAliases } from '../interactive/util'
 import { SearchPatternType } from '../../graphql-operations'
+
+import { filterTypeKeysWithAliases } from './filters'
+import { scanPredicate } from './predicates'
 import {
     Token,
     Whitespace,
@@ -10,10 +12,11 @@ import {
     Literal,
     Pattern,
     Filter,
-    Quoted,
     KeywordKind,
     PatternKind,
     CharacterRange,
+    createLiteral,
+    Separator,
 } from './token'
 
 /**
@@ -108,7 +111,7 @@ const oneOf = <T>(...scanners: Scanner<T>[]): Scanner<T> => (input, start) => {
  * A {@link Scanner} that will attempt to scan delimited strings for an arbitrary
  * delimiter. `\` is treated as an escape character for the delimited string.
  */
-const quoted = (delimiter: string): Scanner<Quoted> => (input, start) => {
+const quoted = (delimiter: string): Scanner<Literal> => (input, start) => {
     if (input[start] !== delimiter) {
         return { type: 'error', expected: delimiter, at: start }
     }
@@ -122,26 +125,25 @@ const quoted = (delimiter: string): Scanner<Quoted> => (input, start) => {
     return {
         type: 'success',
         // end + 1 as `end` is currently the index of the quote in the string.
-        term: { type: 'quoted', quotedValue: input.slice(start + 1, end), range: { start, end: end + 1 } },
+        term: createLiteral(input.slice(start + 1, end), { start, end: end + 1 }, true),
     }
 }
 
 /**
- * Returns a {@link Scanner} that will attempt to scan tokens matching
- * the given character in a search query.
+ * A {@link Scanner} that scans a ':' separator for fields.
  */
-const character = (character: string): Scanner<Literal> => (input, start) => {
-    if (input[start] !== character) {
-        return { type: 'error', expected: character, at: start }
+const filterSeparator = (input: string, start: number): ScanResult<Literal> => {
+    if (input[start] !== ':') {
+        return { type: 'error', expected: ':', at: start }
     }
     return {
         type: 'success',
-        term: { type: 'literal', value: character, range: { start, end: start + 1 } },
+        term: createLiteral(':', { start, end: start + 1 }),
     }
 }
 
 /**
- * Returns a {@link Scanner} that will attempt to scan
+ * A {@link Scanner} that will attempt to scan
  * tokens matching the given RegExp pattern in a search query.
  */
 const scanToken = <T extends Term = Literal>(
@@ -166,7 +168,7 @@ const scanToken = <T extends Term = Literal>(
             type: 'success',
             term: output
                 ? typeof output === 'function'
-                    ? output(input, range)
+                    ? output(match[0], range)
                     : output
                 : ({ type: 'literal', value: match[0], range } as T),
         }
@@ -272,38 +274,54 @@ export const scanBalancedLiteral: Scanner<Literal> = (input, start) => {
 
     return {
         type: 'success',
-        term: {
-            type: 'literal',
-            value: result.join(''),
-            range: { start, end: adjustedStart },
-        },
+        term: createLiteral(result.join(''), { start, end: adjustedStart }),
     }
 }
 
-const whitespace = scanToken(/\s+/, (_input, range) => ({
+/**
+ * Scan predicate syntax like repo:contains(file:README.md). Predicate scanning
+ * takes precedence over other value scanners like scanBalancedLiteral.
+ */
+export const scanPredicateValue = (input: string, start: number, field: Literal): ScanResult<Literal> => {
+    const result = scanPredicate(field.value, input.slice(start))
+    if (!result) {
+        return {
+            type: 'error',
+            expected: 'recognized predicate',
+            at: start,
+        }
+    }
+    const value = `${result.path.join('.')}${result.parameters}`
+    return {
+        type: 'success',
+        term: createLiteral(value, { start, end: start + value.length }),
+    }
+}
+
+const whitespace = scanToken(/\s+/, (_value, range) => ({
     type: 'whitespace',
     range,
 }))
 
 const literal = scanToken(/[^\s)]+/)
 
-const keywordNot = scanToken(/(not|NOT)/, (input, { start, end }) => ({
+const keywordNot = scanToken(/(not|NOT)/, (value, { start, end }) => ({
     type: 'keyword',
-    value: input.slice(start, end),
+    value,
     range: { start, end },
     kind: KeywordKind.Not,
 }))
 
-const keywordAnd = scanToken(/(and|AND)/, (input, { start, end }) => ({
+const keywordAnd = scanToken(/(and|AND)/, (value, { start, end }) => ({
     type: 'keyword',
-    value: input.slice(start, end),
+    value,
     range: { start, end },
     kind: KeywordKind.And,
 }))
 
-const keywordOr = scanToken(/(or|OR)/, (input, { start, end }) => ({
+const keywordOr = scanToken(/(or|OR)/, (value, { start, end }) => ({
     type: 'keyword',
-    value: input.slice(start, end),
+    value,
     range: { start, end },
     kind: KeywordKind.Or,
 }))
@@ -312,38 +330,45 @@ const keyword = oneOf<Keyword>(keywordAnd, keywordOr, keywordNot)
 
 const comment = scanToken(
     /\/\/.*/,
-    (input, { start, end }): Comment => ({ type: 'comment', value: input.slice(start, end), range: { start, end } })
+    (value, { start, end }): Comment => ({ type: 'comment', value, range: { start, end } })
 )
 
-const filterKeyword = scanToken(new RegExp(`-?(${filterTypeKeysWithAliases.join('|')})+(?=:)`, 'i'))
+const filterField = scanToken(new RegExp(`-?(${filterTypeKeysWithAliases.join('|')})+(?=:)`, 'i'))
 
-const filterDelimiter = character(':')
-
-const filterValue = oneOf<Quoted | Literal>(quoted('"'), quoted("'"), scanBalancedLiteral, literal)
+const filterValue = oneOf<Literal>(quoted('"'), quoted("'"), scanBalancedLiteral, literal)
 
 const openingParen = scanToken(/\(/, (_input, range): OpeningParen => ({ type: 'openingParen', range }))
 
 const closingParen = scanToken(/\)/, (_input, range): ClosingParen => ({ type: 'closingParen', range }))
 
 /**
- * Returns a {@link Scanner} that succeeds if a token scanned by `scanToken`,
- * followed by whitespace or EOF, is found in the search query.
+ * Returns a {@link Scanner} that succeeds if `scanTerm` succeeds,
+ * followed by `scanNext`.
  */
-const followedBy = (scanToken: Scanner<Token>, scanNext: Scanner<Token>): Scanner<Token[]> => (input, start) => {
-    const tokens: Token[] = []
-    const tokenResult = scanToken(input, start)
-    if (tokenResult.type === 'error') {
-        return tokenResult
+const followedBy = (scanTerm: Scanner<Term>, scanNext: Scanner<Token>): Scanner<Token[]> => (input, start) => {
+    const result = scanTerm(input, start)
+    if (result.type === 'error') {
+        return result
     }
-    tokens.push(tokenResult.term)
-    let { end } = tokenResult.term.range
-    if (input[end] !== undefined) {
-        const separatorResult = scanNext(input, end)
-        if (separatorResult.type === 'error') {
-            return separatorResult
+    let end: number | undefined
+    const tokens: Token[] = []
+    if (Array.isArray(result.term)) {
+        for (const token of result.term) {
+            tokens.push(token)
+            end = token.range.end
         }
-        tokens.push(separatorResult.term)
-        end = separatorResult.term.range.end
+    } else {
+        tokens.push(result.term)
+        end = result.term.range.end
+    }
+    // Invariant: end is defined.
+    if (end && input[end] !== undefined) {
+        const next = scanNext(input, end)
+        if (next.type === 'error') {
+            return next
+        }
+        tokens.push(next.term)
+        end = next.term.range.end
     }
     return {
         type: 'success',
@@ -357,29 +382,32 @@ const followedBy = (scanToken: Scanner<Token>, scanNext: Scanner<Token>): Scanne
  * in a search query.
  */
 const filter: Scanner<Filter> = (input, start) => {
-    const scannedKeyword = filterKeyword(input, start)
-    if (scannedKeyword.type === 'error') {
-        return scannedKeyword
+    const scanPrefix = followedBy(filterField, filterSeparator)
+    const result = scanPrefix(input, start)
+    if (result.type === 'error') {
+        return result
     }
-    const scannedDelimiter = filterDelimiter(input, scannedKeyword.term.range.end)
-    if (scannedDelimiter.type === 'error') {
-        return scannedDelimiter
+    const [field, separator] = result.term as [Literal, Separator]
+    let value: ScanResult<Literal> | undefined
+    if (input[separator.range.end] === undefined) {
+        value = undefined
+    } else {
+        value = scanPredicateValue(input, separator.range.end, field)
+        if (value.type === 'error') {
+            value = filterValue(input, separator.range.end)
+        }
     }
-    const scannedValue =
-        input[scannedDelimiter.term.range.end] === undefined
-            ? undefined
-            : filterValue(input, scannedDelimiter.term.range.end)
-    if (scannedValue && scannedValue.type === 'error') {
-        return scannedValue
+    if (value && value.type === 'error') {
+        return value
     }
     return {
         type: 'success',
         term: {
             type: 'filter',
-            range: { start, end: scannedValue ? scannedValue.term.range.end : scannedDelimiter.term.range.end },
-            field: scannedKeyword.term,
-            value: scannedValue?.term,
-            negated: scannedKeyword.term.value.startsWith('-'),
+            range: { start, end: value ? value.term.range.end : separator.range.end },
+            field,
+            value: value?.term,
+            negated: field.value.startsWith('-'),
         },
     }
 }
@@ -394,7 +422,7 @@ const createPattern = (value: string, range: CharacterRange, kind: PatternKind):
     },
 })
 
-const scanFilterOrKeyword = oneOf<Literal | Token[]>(filterKeyword, followedBy(keyword, whitespace))
+const scanFilterOrKeyword = oneOf<Literal | Token[]>(filterField, followedBy(keyword, whitespace))
 const keepScanning = (input: string, start: number): boolean => scanFilterOrKeyword(input, start).type !== 'success'
 
 /**

@@ -19,9 +19,8 @@ func Symbols() *monitoring.Container {
 							Name:              "store_fetch_failures",
 							Description:       "store fetch failures every 5m",
 							Query:             `sum(increase(symbols_store_fetch_failed[5m]))`,
-							DataMayNotExist:   true,
-							Warning:           monitoring.Alert().GreaterOrEqual(5),
-							PanelOptions:      monitoring.PanelOptions().LegendFormat("failures"),
+							Warning:           monitoring.Alert().GreaterOrEqual(5, nil),
+							Panel:             monitoring.Panel().LegendFormat("failures"),
 							Owner:             monitoring.ObservableOwnerCodeIntel,
 							PossibleSolutions: "none",
 						},
@@ -29,62 +28,60 @@ func Symbols() *monitoring.Container {
 							Name:              "current_fetch_queue_size",
 							Description:       "current fetch queue size",
 							Query:             `sum(symbols_store_fetch_queue_size)`,
-							DataMayNotExist:   true,
-							Warning:           monitoring.Alert().GreaterOrEqual(25),
-							PanelOptions:      monitoring.PanelOptions().LegendFormat("size"),
+							Warning:           monitoring.Alert().GreaterOrEqual(25, nil),
+							Panel:             monitoring.Panel().LegendFormat("size"),
 							Owner:             monitoring.ObservableOwnerCodeIntel,
 							PossibleSolutions: "none",
 						},
 					},
 					{
-						shared.FrontendInternalAPIErrorResponses("symbols", monitoring.ObservableOwnerCodeIntel),
+						shared.FrontendInternalAPIErrorResponses("symbols", monitoring.ObservableOwnerCodeIntel).Observable(),
 					},
 				},
 			},
 			{
-				Title:  "Container monitoring (not available on server)",
+				Title:  shared.TitleContainerMonitoring,
 				Hidden: true,
 				Rows: []monitoring.Row{
 					{
-						shared.ContainerCPUUsage("symbols", monitoring.ObservableOwnerCodeIntel),
-						shared.ContainerMemoryUsage("symbols", monitoring.ObservableOwnerCodeIntel),
+						shared.ContainerCPUUsage("symbols", monitoring.ObservableOwnerCodeIntel).Observable(),
+						shared.ContainerMemoryUsage("symbols", monitoring.ObservableOwnerCodeIntel).Observable(),
 					},
 					{
-						shared.ContainerRestarts("symbols", monitoring.ObservableOwnerCodeIntel),
-						shared.ContainerFsInodes("symbols", monitoring.ObservableOwnerCodeIntel),
+						shared.ContainerMissing("symbols", monitoring.ObservableOwnerCodeIntel).Observable(),
 					},
 				},
 			},
 			{
-				Title:  "Provisioning indicators (not available on server)",
+				Title:  shared.TitleProvisioningIndicators,
 				Hidden: true,
 				Rows: []monitoring.Row{
 					{
-						shared.ProvisioningCPUUsageLongTerm("symbols", monitoring.ObservableOwnerCodeIntel),
-						shared.ProvisioningMemoryUsageLongTerm("symbols", monitoring.ObservableOwnerCodeIntel),
+						shared.ProvisioningCPUUsageLongTerm("symbols", monitoring.ObservableOwnerCodeIntel).Observable(),
+						shared.ProvisioningMemoryUsageLongTerm("symbols", monitoring.ObservableOwnerCodeIntel).Observable(),
 					},
 					{
-						shared.ProvisioningCPUUsageShortTerm("symbols", monitoring.ObservableOwnerCodeIntel),
-						shared.ProvisioningMemoryUsageShortTerm("symbols", monitoring.ObservableOwnerCodeIntel),
-					},
-				},
-			},
-			{
-				Title:  "Golang runtime monitoring",
-				Hidden: true,
-				Rows: []monitoring.Row{
-					{
-						shared.GoGoroutines("symbols", monitoring.ObservableOwnerCodeIntel),
-						shared.GoGcDuration("symbols", monitoring.ObservableOwnerCodeIntel),
+						shared.ProvisioningCPUUsageShortTerm("symbols", monitoring.ObservableOwnerCodeIntel).Observable(),
+						shared.ProvisioningMemoryUsageShortTerm("symbols", monitoring.ObservableOwnerCodeIntel).Observable(),
 					},
 				},
 			},
 			{
-				Title:  "Kubernetes monitoring (ignore if using Docker Compose or server)",
+				Title:  shared.TitleGolangMonitoring,
 				Hidden: true,
 				Rows: []monitoring.Row{
 					{
-						shared.KubernetesPodsAvailable("symbols", monitoring.ObservableOwnerCodeIntel),
+						shared.GoGoroutines("symbols", monitoring.ObservableOwnerCodeIntel).Observable(),
+						shared.GoGcDuration("symbols", monitoring.ObservableOwnerCodeIntel).Observable(),
+					},
+				},
+			},
+			{
+				Title:  shared.TitleKubernetesMonitoring,
+				Hidden: true,
+				Rows: []monitoring.Row{
+					{
+						shared.KubernetesPodsAvailable("symbols", monitoring.ObservableOwnerCodeIntel).Observable(),
 					},
 				},
 			},

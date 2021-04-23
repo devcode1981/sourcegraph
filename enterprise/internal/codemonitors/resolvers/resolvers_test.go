@@ -13,14 +13,15 @@ import (
 
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/backend"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend"
-	campaignApitest "github.com/sourcegraph/sourcegraph/enterprise/internal/campaigns/resolvers/apitest"
+	batchesApitest "github.com/sourcegraph/sourcegraph/enterprise/internal/batches/resolvers/apitest"
 	cm "github.com/sourcegraph/sourcegraph/enterprise/internal/codemonitors"
+	"github.com/sourcegraph/sourcegraph/enterprise/internal/codemonitors/email"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/codemonitors/resolvers/apitest"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/codemonitors/storetest"
 	"github.com/sourcegraph/sourcegraph/internal/actor"
-	"github.com/sourcegraph/sourcegraph/internal/db"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbconn"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbtesting"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbconn"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbtesting"
 )
 
 func init() {
@@ -57,8 +58,8 @@ func TestCreateCodeMonitor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(want, got.(*monitor).Monitor) {
-		t.Fatalf("\ngot:\t %+v,\nwant:\t %+v", got.(*monitor).Monitor, want)
+	if diff := cmp.Diff(want, got.(*monitor).Monitor); diff != "" {
+		t.Error(diff)
 	}
 
 	// Toggle field enabled from true to false.
@@ -84,6 +85,96 @@ func TestCreateCodeMonitor(t *testing.T) {
 	}
 }
 
+func TestListCodeMonitors(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	ctx := backend.WithAuthzBypass(context.Background())
+	dbtesting.SetupGlobalTestDB(t)
+	r := newTestResolver(t)
+
+	userID := insertTestUser(t, dbconn.Global, "cm-user1", true)
+	ctx = actor.WithActor(ctx, actor.FromUser(userID))
+
+	// Create a monitor.
+	_, err := r.insertTestMonitorWithOpts(ctx, t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	args := &graphqlbackend.ListMonitorsArgs{
+		First: 5,
+	}
+	r1, err := r.Monitors(ctx, userID, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requireNodeCount(t, r1, 1)
+	requireHasNextPage(t, r1, false)
+
+	// Create enough monitors to necessitate paging
+	for i := 0; i < 10; i++ {
+		_, err := r.insertTestMonitorWithOpts(ctx, t)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r2, err := r.Monitors(ctx, userID, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requireNodeCount(t, r2, 5)
+	requireHasNextPage(t, r2, true)
+
+	// The returned cursor should be usable to return the remaining monitors
+	pi, err := r2.PageInfo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	args = &graphqlbackend.ListMonitorsArgs{
+		First: 10,
+		After: pi.EndCursor(),
+	}
+	r3, err := r.Monitors(ctx, userID, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requireNodeCount(t, r3, 6)
+	requireHasNextPage(t, r3, false)
+}
+
+func requireNodeCount(t *testing.T, r graphqlbackend.MonitorConnectionResolver, c int) {
+	t.Helper()
+
+	nodes, err := r.Nodes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(nodes) != c {
+		t.Fatalf("got %d nodes but expected %d", len(nodes), c)
+	}
+}
+
+func requireHasNextPage(t *testing.T, r graphqlbackend.MonitorConnectionResolver, hasNextPage bool) {
+	t.Helper()
+
+	pageInfo, err := r.PageInfo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if pageInfo.HasNextPage() != hasNextPage {
+		t.Fatalf("unexpected value for HasNextPage")
+	}
+}
+
 func TestIsAllowedToEdit(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -97,7 +188,7 @@ func TestIsAllowedToEdit(t *testing.T) {
 	siteAdmin := insertTestUser(t, dbconn.Global, "cm-user3", true)
 
 	admContext := actor.WithActor(context.Background(), actor.FromUser(siteAdmin))
-	org, err := db.Orgs.Create(admContext, "cm-test-org", nil)
+	org, err := database.GlobalOrgs.Create(admContext, "cm-test-org", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +243,7 @@ func TestIsAllowedToCreate(t *testing.T) {
 	siteAdmin := insertTestUser(t, dbconn.Global, "cm-user3", true)
 
 	admContext := actor.WithActor(context.Background(), actor.FromUser(siteAdmin))
-	org, err := db.Orgs.Create(admContext, "cm-test-org", nil)
+	org, err := database.GlobalOrgs.Create(admContext, "cm-test-org", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +387,7 @@ func TestQueryMonitor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	schema, err := graphqlbackend.NewSchema(nil, nil, nil, r, nil)
+	schema, err := graphqlbackend.NewSchema(dbconn.Global, nil, nil, nil, nil, r, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +421,7 @@ func queryByUser(ctx context.Context, t *testing.T, schema *graphql.Schema, r *R
 		"actionCursor": relay.MarshalID(monitorActionEventKind, 1),
 	}
 	response := apitest.Response{}
-	campaignApitest.MustExec(ctx, t, schema, input, &response, queryByUserFmtStr)
+	batchesApitest.MustExec(ctx, t, schema, input, &response, queryByUserFmtStr)
 
 	triggerEventEndCursor := string(relay.MarshalID(monitorTriggerEventKind, 1))
 	actionEventEndCursor := string(relay.MarshalID(monitorActionEventKind, 2))
@@ -532,7 +623,7 @@ func TestEditCodeMonitor(t *testing.T) {
 
 	// Update the code monitor.
 	// We update all fields, delete one action, and add a new action.
-	schema, err := graphqlbackend.NewSchema(nil, nil, nil, r, nil)
+	schema, err := graphqlbackend.NewSchema(dbconn.Global, nil, nil, nil, nil, r, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +635,7 @@ func TestEditCodeMonitor(t *testing.T) {
 		"user2ID":   ns2,
 	}
 	got := apitest.UpdateCodeMonitorResponse{}
-	campaignApitest.MustExec(ctx, t, schema, updateInput, &got, editMonitor)
+	batchesApitest.MustExec(ctx, t, schema, updateInput, &got, editMonitor)
 
 	want := apitest.UpdateCodeMonitorResponse{
 		UpdateCodeMonitor: apitest.Monitor{
@@ -674,7 +765,7 @@ func recipientPaging(ctx context.Context, t *testing.T, schema *graphql.Schema, 
 		"recipientCursor": string(relay.MarshalID(monitorActionEmailRecipientKind, 1)),
 	}
 	got := apitest.Response{}
-	campaignApitest.MustExec(ctx, t, schema, queryInput, &got, recipientsPagingFmtStr)
+	batchesApitest.MustExec(ctx, t, schema, queryInput, &got, recipientsPagingFmtStr)
 
 	want := apitest.Response{
 		User: apitest.User{
@@ -735,7 +826,7 @@ func queryByID(ctx context.Context, t *testing.T, schema *graphql.Schema, r *Res
 		"id": m.ID(),
 	}
 	response := apitest.Node{}
-	campaignApitest.MustExec(ctx, t, schema, input, &response, queryMonitorByIDFmtStr)
+	batchesApitest.MustExec(ctx, t, schema, input, &response, queryMonitorByIDFmtStr)
 
 	want := apitest.Node{
 		Node: apitest.Monitor{
@@ -860,7 +951,7 @@ func monitorPaging(ctx context.Context, t *testing.T, schema *graphql.Schema, us
 		"monitorCursor": string(relay.MarshalID(MonitorKind, 1)),
 	}
 	got := apitest.Response{}
-	campaignApitest.MustExec(ctx, t, schema, queryInput, &got, monitorPagingFmtStr)
+	batchesApitest.MustExec(ctx, t, schema, queryInput, &got, monitorPagingFmtStr)
 
 	want := apitest.Response{
 		User: apitest.User{
@@ -897,7 +988,7 @@ func actionPaging(ctx context.Context, t *testing.T, schema *graphql.Schema, use
 		"actionCursor": string(relay.MarshalID(monitorActionEmailKind, 1)),
 	}
 	got := apitest.Response{}
-	campaignApitest.MustExec(ctx, t, schema, queryInput, &got, actionPagingFmtStr)
+	batchesApitest.MustExec(ctx, t, schema, queryInput, &got, actionPagingFmtStr)
 
 	want := apitest.Response{
 		User: apitest.User{
@@ -948,7 +1039,7 @@ func triggerEventPaging(ctx context.Context, t *testing.T, schema *graphql.Schem
 		"triggerEventCursor": relay.MarshalID(monitorTriggerEventKind, 1),
 	}
 	got := apitest.Response{}
-	campaignApitest.MustExec(ctx, t, schema, queryInput, &got, triggerEventPagingFmtStr)
+	batchesApitest.MustExec(ctx, t, schema, queryInput, &got, triggerEventPagingFmtStr)
 
 	want := apitest.Response{
 		User: apitest.User{
@@ -1002,7 +1093,7 @@ func actionEventPaging(ctx context.Context, t *testing.T, schema *graphql.Schema
 		"actionEventCursor": relay.MarshalID(monitorActionEventKind, 1),
 	}
 	got := apitest.Response{}
-	campaignApitest.MustExec(ctx, t, schema, queryInput, &got, actionEventPagingFmtStr)
+	batchesApitest.MustExec(ctx, t, schema, queryInput, &got, actionEventPagingFmtStr)
 
 	want := apitest.Response{
 		User: apitest.User{
@@ -1060,3 +1151,50 @@ query($userName: String!, $actionCursor:String!, $actionEventCursor:String!){
 	}
 }
 `
+
+func TestTriggerTestEmailAction(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	got := email.TemplateDataNewSearchResults{}
+	email.MockSendEmailForNewSearchResult = func(ctx context.Context, userID int32, data *email.TemplateDataNewSearchResults) error {
+		got = *data
+		return nil
+	}
+
+	ctx := backend.WithAuthzBypass(context.Background())
+	r := newTestResolver(t)
+
+	userID := 1
+	namespaceID := relay.MarshalID("User", actor.FromContext(ctx).UID)
+
+	ctx = actor.WithActor(ctx, actor.FromUser(int32(userID)))
+	_, err := r.TriggerTestEmailAction(ctx, &graphqlbackend.TriggerTestEmailActionArgs{
+		Namespace:   namespaceID,
+		Description: "A code monitor name",
+		Email: &graphqlbackend.CreateActionEmailArgs{
+			Enabled:    true,
+			Priority:   "NORMAL",
+			Recipients: []graphql.ID{namespaceID},
+			Header:     "test header 1",
+		},
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !got.IsTest {
+		t.Fatalf("Template data for testing email actions should have with .IsTest=true")
+	}
+}
+
+func TestMonitorKindEqualsResolvers(t *testing.T) {
+	got := email.MonitorKind
+	want := MonitorKind
+
+	if got != want {
+		t.Fatal("email.MonitorKind should match resolvers.MonitorKind")
+	}
+}

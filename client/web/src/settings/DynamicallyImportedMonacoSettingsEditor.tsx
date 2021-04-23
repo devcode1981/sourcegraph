@@ -1,20 +1,23 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import * as H from 'history'
 import * as _monaco from 'monaco-editor' // type only
 import * as React from 'react'
 import { Subscription } from 'rxjs'
-import { SaveToolbar } from '../components/SaveToolbar'
-import * as _monacoSettingsEditorModule from './MonacoSettingsEditor' // type only
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+
+import { SaveToolbarProps, SaveToolbar, SaveToolbarPropsGenerator } from '../components/SaveToolbar'
 import { EditorAction } from '../site-admin/configHelpers'
-import { ThemeProps } from '../../../shared/src/theme'
-import { TelemetryProps } from '../../../shared/src/telemetry/telemetryService'
+
+import * as _monacoSettingsEditorModule from './MonacoSettingsEditor' // type only
 
 /**
  * Converts a Monaco/vscode style Disposable object to a simple function that can be added to a rxjs Subscription
  */
 const disposableToFn = (disposable: _monaco.IDisposable) => () => disposable.dispose()
 
-interface Props
+interface Props<T extends object>
     extends Pick<_monacoSettingsEditorModule.Props, 'id' | 'readOnly' | 'height' | 'jsonSchema' | 'language'>,
         ThemeProps,
         TelemetryProps {
@@ -40,6 +43,12 @@ interface Props
     onSave?: (value: string) => void
     onChange?: (value: string) => void
     onDirtyChange?: (dirty: boolean) => void
+
+    customSaveToolbar?: {
+        propsGenerator: SaveToolbarPropsGenerator<T & { children?: React.ReactNode }>
+        saveToolbar: React.FunctionComponent<SaveToolbarProps & T>
+    }
+
     history: H.History
 }
 
@@ -53,7 +62,10 @@ const MonacoSettingsEditor = React.lazy(async () => ({
 }))
 
 /** Displays a MonacoSettingsEditor component without loading Monaco in the current Webpack chunk. */
-export class DynamicallyImportedMonacoSettingsEditor extends React.PureComponent<Props, State> {
+export class DynamicallyImportedMonacoSettingsEditor<T extends object = {}> extends React.PureComponent<
+    Props<T>,
+    State
+> {
     public state: State = {}
 
     private subscriptions = new Subscription()
@@ -91,18 +103,31 @@ export class DynamicallyImportedMonacoSettingsEditor extends React.PureComponent
     }
 
     public render(): JSX.Element | null {
-        const isDirty = this.isDirty
         const effectiveValue = this.effectiveValue
+
+        let saveToolbar: React.ReactElement | null = null
+        if (this.props.customSaveToolbar) {
+            const toolbarProps = this.props.customSaveToolbar.propsGenerator({
+                dirty: this.isDirty,
+                saving: this.props.saving,
+                onSave: this.onSave,
+                onDiscard: this.discard,
+            })
+            saveToolbar = this.props.customSaveToolbar.saveToolbar(toolbarProps)
+        } else {
+            saveToolbar = (
+                <SaveToolbar
+                    dirty={this.isDirty}
+                    saving={this.props.saving}
+                    onSave={this.onSave}
+                    onDiscard={this.discard}
+                />
+            )
+        }
+
         return (
             <div className={this.props.className || ''}>
-                {this.props.canEdit && (
-                    <SaveToolbar
-                        dirty={isDirty}
-                        saving={this.props.saving}
-                        onSave={this.onSave}
-                        onDiscard={this.discard}
-                    />
-                )}
+                {this.props.canEdit && saveToolbar}
                 {this.props.actions && (
                     <div className="site-admin-configuration-page__action-groups">
                         <div className="site-admin-configuration-page__actions">

@@ -1,4 +1,4 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import * as H from 'history'
 import AddIcon from 'mdi-react/AddIcon'
 import ArrowLeftIcon from 'mdi-react/ArrowLeftIcon'
 import React, { useState, useMemo, useEffect, useCallback } from 'react'
@@ -6,19 +6,26 @@ import { RouteComponentProps } from 'react-router'
 import { Link } from 'react-router-dom'
 import { Observable, Subject, NEVER } from 'rxjs'
 import { catchError, map, mapTo, startWith, switchMap, tap, filter } from 'rxjs/operators'
-import { gql } from '../../../../../../shared/src/graphql/graphql'
-import * as GQL from '../../../../../../shared/src/graphql/schema'
-import { asError, createAggregateError, isErrorLike } from '../../../../../../shared/src/util/errors'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { gql } from '@sourcegraph/shared/src/graphql/graphql'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { asError, createAggregateError, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { useEventObservable, useObservable } from '@sourcegraph/shared/src/util/useObservable'
+
 import { queryGraphQL, requestGraphQL } from '../../../../backend/graphql'
+import { ErrorAlert } from '../../../../components/alerts'
 import { FilteredConnection } from '../../../../components/FilteredConnection'
 import { PageTitle } from '../../../../components/PageTitle'
 import { Timestamp } from '../../../../components/time/Timestamp'
+import { ArchiveProductSubscriptionResult, ArchiveProductSubscriptionVariables } from '../../../../graphql-operations'
 import { eventLogger } from '../../../../tracking/eventLogger'
 import { AccountEmailAddresses } from '../../../dotcom/productSubscriptions/AccountEmailAddresses'
 import { AccountName } from '../../../dotcom/productSubscriptions/AccountName'
 import { ProductSubscriptionLabel } from '../../../dotcom/productSubscriptions/ProductSubscriptionLabel'
 import { LicenseGenerationKeyWarning } from '../../../productSubscription/LicenseGenerationKeyWarning'
 import { ProductSubscriptionHistory } from '../../../user/productSubscriptions/ProductSubscriptionHistory'
+
 import { SiteAdminGenerateProductLicenseForSubscriptionForm } from './SiteAdminGenerateProductLicenseForSubscriptionForm'
 import {
     siteAdminProductLicenseFragment,
@@ -26,10 +33,6 @@ import {
     SiteAdminProductLicenseNodeProps,
 } from './SiteAdminProductLicenseNode'
 import { SiteAdminProductSubscriptionBillingLink } from './SiteAdminProductSubscriptionBillingLink'
-import { ErrorAlert } from '../../../../components/alerts'
-import { useEventObservable, useObservable } from '../../../../../../shared/src/util/useObservable'
-import * as H from 'history'
-import { ArchiveProductSubscriptionResult, ArchiveProductSubscriptionVariables } from '../../../../graphql-operations'
 
 interface Props extends RouteComponentProps<{ subscriptionUUID: string }> {
     /** For mocking in tests only. */
@@ -138,7 +141,7 @@ export const SiteAdminProductSubscriptionPage: React.FunctionComponent<Props> = 
             {productSubscription === LOADING ? (
                 <LoadingSpinner className="icon-inline" />
             ) : isErrorLike(productSubscription) ? (
-                <ErrorAlert className="my-2" error={productSubscription} history={history} />
+                <ErrorAlert className="my-2" error={productSubscription} />
             ) : (
                 <>
                     <h2>Product subscription {productSubscription.name}</h2>
@@ -151,7 +154,7 @@ export const SiteAdminProductSubscriptionPage: React.FunctionComponent<Props> = 
                         >
                             Archive
                         </button>
-                        {isErrorLike(archival) && <ErrorAlert className="mt-2" error={archival} history={history} />}
+                        {isErrorLike(archival) && <ErrorAlert className="mt-2" error={archival} />}
                     </div>
                     <div className="card mt-3">
                         <div className="card-header">Details</div>
@@ -219,7 +222,6 @@ export const SiteAdminProductSubscriptionPage: React.FunctionComponent<Props> = 
                                 <SiteAdminGenerateProductLicenseForSubscriptionForm
                                     subscriptionID={productSubscription.id}
                                     onGenerate={onLicenseUpdate}
-                                    history={history}
                                 />
                             </div>
                         )}

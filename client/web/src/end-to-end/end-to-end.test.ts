@@ -1,16 +1,19 @@
-import { describe, test, before, beforeEach, after, afterEach } from 'mocha'
-import { afterEachSaveScreenshotIfFailed } from '../../../shared/src/testing/screenshotReporter'
-import { afterEachRecordCoverage } from '../../../shared/src/testing/coverage'
-import { retry } from '../../../shared/src/testing/utils'
-import { createDriverForTest, Driver, percySnapshot } from '../../../shared/src/testing/driver'
-import got from 'got'
-import { gql } from '../../../shared/src/graphql/graphql'
-import { random, sortBy } from 'lodash'
-import MockDate from 'mockdate'
-import { ExternalServiceKind } from '../../../shared/src/graphql/schema'
-import { getConfig } from '../../../shared/src/testing/config'
 import assert from 'assert'
+
 import expect from 'expect'
+import got from 'got'
+import { random, sortBy } from 'lodash'
+import { describe, test, before, beforeEach, after, afterEach } from 'mocha'
+import MockDate from 'mockdate'
+
+import { gql } from '@sourcegraph/shared/src/graphql/graphql'
+import { ExternalServiceKind } from '@sourcegraph/shared/src/graphql/schema'
+import { getConfig } from '@sourcegraph/shared/src/testing/config'
+import { afterEachRecordCoverage } from '@sourcegraph/shared/src/testing/coverage'
+import { createDriverForTest, Driver, percySnapshot } from '@sourcegraph/shared/src/testing/driver'
+import { afterEachSaveScreenshotIfFailed } from '@sourcegraph/shared/src/testing/screenshotReporter'
+import { retry } from '@sourcegraph/shared/src/testing/utils'
+
 import { Settings } from '../schema/settings.schema'
 
 const { gitHubToken, sourcegraphBaseUrl } = getConfig('gitHubToken', 'sourcegraphBaseUrl')
@@ -917,7 +920,7 @@ describe('e2e test suite', () => {
                 await driver.page.waitForSelector('#repo-revision-popover', { visible: true })
                 await driver.page.click('#repo-revision-popover')
                 // Click "Tags" tab
-                await driver.page.click('.revisions-popover .tab-bar__tab:nth-child(2)')
+                await driver.page.click('.revisions-popover [data-test-tab="tags"]')
                 await driver.page.waitForSelector('a.git-ref-node[href*="0.5.0"]', { visible: true })
                 await driver.page.click('a.git-ref-node[href*="0.5.0"]')
                 await driver.assertWindowLocation('/github.com/sourcegraph/go-diff@v0.5.0/-/blob/diff/diff.go')
@@ -1095,11 +1098,6 @@ describe('e2e test suite', () => {
     })
 
     describe('Search component', () => {
-        test('redirects to a URL with &patternType=regexp if no patternType in URL', async () => {
-            await driver.page.goto(sourcegraphBaseUrl + '/search?q=test')
-            await driver.assertWindowLocation('/search?q=test&patternType=regexp')
-        })
-
         test('regexp toggle appears and updates patternType query parameter when clicked', async () => {
             await driver.page.goto(sourcegraphBaseUrl + '/search?q=test&patternType=literal')
             // Wait for monaco query input to load to avoid race condition with the intermediate input
@@ -1149,7 +1147,7 @@ describe('e2e test suite', () => {
             await driver.page.waitForSelector('.test-saved-search-modal')
             await driver.page.waitForSelector('.test-saved-search-modal-save-button')
             await driver.page.click('.test-saved-search-modal-save-button')
-            await driver.assertWindowLocation('/users/test/searches/add?query=test&patternType=regexp')
+            await driver.assertWindowLocation('/users/test/searches/add?query=test&patternType=literal')
 
             await driver.page.waitForSelector('.test-saved-search-form-input-description', { visible: true })
             await driver.page.click('.test-saved-search-form-input-description')

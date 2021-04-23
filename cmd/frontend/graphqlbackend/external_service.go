@@ -12,13 +12,15 @@ import (
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/backend"
 	"github.com/sourcegraph/sourcegraph/internal/actor"
 	"github.com/sourcegraph/sourcegraph/internal/conf"
-	"github.com/sourcegraph/sourcegraph/internal/db"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 	"github.com/sourcegraph/sourcegraph/schema"
 )
 
 type externalServiceResolver struct {
+	db              dbutil.DB
 	externalService *types.ExternalService
 	warning         string
 
@@ -29,13 +31,13 @@ type externalServiceResolver struct {
 
 const externalServiceIDKind = "ExternalService"
 
-func externalServiceByID(ctx context.Context, gqlID graphql.ID) (*externalServiceResolver, error) {
+func externalServiceByID(ctx context.Context, db dbutil.DB, gqlID graphql.ID) (*externalServiceResolver, error) {
 	id, err := unmarshalExternalServiceID(gqlID)
 	if err != nil {
 		return nil, err
 	}
 
-	es, err := db.ExternalServices.GetByID(ctx, id)
+	es, err := database.GlobalExternalServices.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +52,7 @@ func externalServiceByID(ctx context.Context, gqlID graphql.ID) (*externalServic
 		}
 	}
 
-	return &externalServiceResolver{externalService: es}, nil
+	return &externalServiceResolver{db: db, externalService: es}, nil
 }
 
 func marshalExternalServiceID(id int64) graphql.ID {
@@ -78,8 +80,12 @@ func (r *externalServiceResolver) DisplayName() string {
 	return r.externalService.DisplayName
 }
 
-func (r *externalServiceResolver) Config() JSONCString {
-	return JSONCString(r.externalService.Config)
+func (r *externalServiceResolver) Config() (JSONCString, error) {
+	err := r.externalService.RedactConfigSecrets()
+	if err != nil {
+		return "", err
+	}
+	return JSONCString(r.externalService.Config), nil
 }
 
 func (r *externalServiceResolver) CreatedAt() DateTime {
@@ -90,12 +96,16 @@ func (r *externalServiceResolver) UpdatedAt() DateTime {
 	return DateTime{Time: r.externalService.UpdatedAt}
 }
 
-func (r *externalServiceResolver) Namespace() *graphql.ID {
+func (r *externalServiceResolver) Namespace(ctx context.Context) (*NamespaceResolver, error) {
 	if r.externalService.NamespaceUserID == 0 {
-		return nil
+		return nil, nil
 	}
 	userID := MarshalUserID(r.externalService.NamespaceUserID)
-	return &userID
+	n, err := NamespaceByID(ctx, r.db, userID)
+	if err != nil {
+		return nil, err
+	}
+	return &NamespaceResolver{n}, nil
 }
 
 func (r *externalServiceResolver) WebhookURL() (*string, error) {
@@ -138,7 +148,7 @@ func (r *externalServiceResolver) Warning() *string {
 }
 
 func (r *externalServiceResolver) LastSyncError(ctx context.Context) (*string, error) {
-	latestError, err := db.ExternalServices.GetLastSyncError(ctx, r.externalService.ID)
+	latestError, err := database.GlobalExternalServices.GetLastSyncError(ctx, r.externalService.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -146,4 +156,22 @@ func (r *externalServiceResolver) LastSyncError(ctx context.Context) (*string, e
 		return nil, nil
 	}
 	return &latestError, nil
+}
+
+func (r *externalServiceResolver) RepoCount(ctx context.Context) (int32, error) {
+	return database.GlobalExternalServices.RepoCount(ctx, r.externalService.ID)
+}
+
+func (r *externalServiceResolver) LastSyncAt() *DateTime {
+	if r.externalService.LastSyncAt.IsZero() {
+		return nil
+	}
+	return &DateTime{Time: r.externalService.LastSyncAt}
+}
+
+func (r *externalServiceResolver) NextSyncAt() *DateTime {
+	if r.externalService.NextSyncAt.IsZero() {
+		return nil
+	}
+	return &DateTime{Time: r.externalService.NextSyncAt}
 }

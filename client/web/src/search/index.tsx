@@ -1,14 +1,25 @@
 import { escapeRegExp } from 'lodash'
-import { FiltersToTypeAndValue } from '../../../shared/src/search/interactive/util'
-import { replaceRange } from '../../../shared/src/util/strings'
-import { discreteValueAliases } from '../../../shared/src/search/query/filters'
-import { VersionContext } from '../schema/site.schema'
-import { SearchPatternType } from '../../../shared/src/graphql-operations'
 import { Observable } from 'rxjs'
-import { ISavedSearch } from '../../../shared/src/graphql/schema'
-import { EventLogResult } from './backend'
-import { AggregateStreamingSearchResults } from './stream'
-import { findFilter, FilterKind } from '../../../shared/src/search/query/validate'
+import { map } from 'rxjs/operators'
+
+import { SearchPatternType } from '@sourcegraph/shared/src/graphql-operations'
+import { ISavedSearch } from '@sourcegraph/shared/src/graphql/schema'
+import { discreteValueAliases, escapeSpaces, FilterType } from '@sourcegraph/shared/src/search/query/filters'
+import { Filter } from '@sourcegraph/shared/src/search/query/token'
+import { findFilter, FilterKind } from '@sourcegraph/shared/src/search/query/validate'
+import { VersionContextProps } from '@sourcegraph/shared/src/search/util'
+import { memoizeObservable } from '@sourcegraph/shared/src/util/memoizeObservable'
+import { replaceRange } from '@sourcegraph/shared/src/util/strings'
+
+import { VersionContext } from '../schema/site.schema'
+
+import {
+    EventLogResult,
+    isSearchContextAvailable,
+    fetchAutoDefinedSearchContexts,
+    fetchSearchContexts,
+} from './backend'
+import { AggregateStreamingSearchResults, StreamSearchOptions } from './stream'
 
 /**
  * Parses the query out of the URL search params (the 'q' parameter). In non-interactive mode, if the 'q' parameter is not present, it
@@ -16,9 +27,6 @@ import { findFilter, FilterKind } from '../../../shared/src/search/query/validat
  * will be parsed and detected.
  *
  * @param query the URL query parameters
- * @param interactiveMode whether to parse the search URL query in interactive mode, reading query params such as `repo=` and `file=`.
- * @param navbarQueryOnly whether to only parse the query for the main query input, i.e. only the value passed to the `q=`
- * URL query parameter, as this represents the query that appears in the main query input in both modes.
  *
  */
 export function parseSearchURLQuery(query: string): string | undefined {
@@ -47,13 +55,13 @@ export function parseSearchURLPatternType(query: string): SearchPatternType | un
  * Parses the version context out of the URL search params (the 'c' parameter). If the version context
  * is not present, return undefined.
  */
-export function parseSearchURLVersionContext(query: string): string | undefined {
+function parseSearchURLVersionContext(query: string): string | undefined {
     const searchParameters = new URLSearchParams(query)
     const context = searchParameters.get('c')
     return context ?? undefined
 }
 
-export function searchURLIsCaseSensitive(query: string): boolean {
+function searchURLIsCaseSensitive(query: string): boolean {
     const globalCase = findFilter(parseSearchURLQuery(query) || '', 'case', FilterKind.Global)
     if (globalCase?.value && globalCase.value.type === 'literal') {
         // if `case:` filter exists in the query, override the existing case: query param
@@ -62,6 +70,13 @@ export function searchURLIsCaseSensitive(query: string): boolean {
     const searchParameters = new URLSearchParams(query)
     const caseSensitive = searchParameters.get('case')
     return discreteValueAliases.yes.includes(caseSensitive || '')
+}
+
+export interface ParsedSearchURL {
+    query: string | undefined
+    patternType: SearchPatternType | undefined
+    caseSensitive: boolean
+    versionContext: string | undefined
 }
 
 /**
@@ -74,13 +89,9 @@ export function searchURLIsCaseSensitive(query: string): boolean {
  * @param urlSearchQuery a URL's query string.
  */
 export function parseSearchURL(
-    urlSearchQuery: string
-): {
-    query: string | undefined
-    patternType: SearchPatternType | undefined
-    caseSensitive: boolean
-    versionContext: string | undefined
-} {
+    urlSearchQuery: string,
+    { appendCaseFilter = false }: { appendCaseFilter?: boolean } = {}
+): ParsedSearchURL {
     let finalQuery = parseSearchURLQuery(urlSearchQuery) || ''
     let patternType = parseSearchURLPatternType(urlSearchQuery)
     let caseSensitive = searchURLIsCaseSensitive(urlSearchQuery)
@@ -103,8 +114,11 @@ export function parseSearchURL(
             caseSensitive = false
         }
     }
-    // Invariant: If case:value was in the query, it is erased at this point. Add case:yes if needed.
-    finalQuery = caseSensitive ? `${finalQuery} case:yes` : finalQuery
+
+    if (appendCaseFilter) {
+        // Invariant: If case:value was in the query, it is erased at this point. Add case:yes if needed.
+        finalQuery = caseSensitive ? `${finalQuery} case:yes` : finalQuery
+    }
 
     return {
         query: finalQuery,
@@ -116,9 +130,9 @@ export function parseSearchURL(
 
 export function repoFilterForRepoRevision(repoName: string, globbing: boolean, revision?: string): string {
     if (globbing) {
-        return `${quoteIfNeeded(`${repoName}${revision ? `@${abbreviateOID(revision)}` : ''}`)}`
+        return `${escapeSpaces(`${repoName}${revision ? `@${abbreviateOID(revision)}` : ''}`)}`
     }
-    return `${quoteIfNeeded(`^${escapeRegExp(repoName)}$${revision ? `@${abbreviateOID(revision)}` : ''}`)}`
+    return `${escapeSpaces(`^${escapeRegExp(repoName)}$${revision ? `@${abbreviateOID(revision)}` : ''}`)}`
 }
 
 export function searchQueryForRepoRevision(repoName: string, globbing: boolean, revision?: string): string {
@@ -139,6 +153,11 @@ export function quoteIfNeeded(string: string): string {
     return string
 }
 
+export interface ParsedSearchQueryProps {
+    parsedSearchQuery: string
+    setParsedSearchQuery: (query: string) => void
+}
+
 export interface PatternTypeProps {
     patternType: SearchPatternType
     setPatternType: (patternType: SearchPatternType) => void
@@ -149,12 +168,10 @@ export interface CaseSensitivityProps {
     setCaseSensitivity: (caseSensitive: boolean) => void
 }
 
-export interface InteractiveSearchProps {
-    filtersInQuery: FiltersToTypeAndValue
-    onFiltersInQueryChange: (filtersInQuery: FiltersToTypeAndValue) => void
-    splitSearchModes: boolean
-    interactiveSearchMode: boolean
-    toggleSearchMode: (event: React.MouseEvent<HTMLAnchorElement>) => void
+export interface MutableVersionContextProps extends VersionContextProps {
+    setVersionContext: (versionContext: string | undefined) => Promise<void>
+    availableVersionContexts: VersionContext[] | undefined
+    previousVersionContext: string | null
 }
 
 export interface CopyQueryButtonProps {
@@ -167,6 +184,17 @@ export interface RepogroupHomepageProps {
 
 export interface OnboardingTourProps {
     showOnboardingTour: boolean
+}
+
+export interface SearchContextProps {
+    showSearchContext: boolean
+    showSearchContextManagement: boolean
+    showSearchContextHighlightTourStep?: boolean
+    defaultSearchContextSpec: string
+    selectedSearchContextSpec?: string
+    setSelectedSearchContextSpec: (spec: string) => void
+    fetchAutoDefinedSearchContexts: typeof fetchAutoDefinedSearchContexts
+    fetchSearchContexts: typeof fetchSearchContexts
 }
 
 export interface ShowQueryBuilderProps {
@@ -184,12 +212,7 @@ export interface HomePanelsProps {
 }
 
 export interface SearchStreamingProps {
-    streamSearch: (
-        query: string,
-        version: string,
-        patternType: SearchPatternType,
-        versionContext: string | undefined
-    ) => Observable<AggregateStreamingSearchResults>
+    streamSearch: (options: StreamSearchOptions) => Observable<AggregateStreamingSearchResults>
 }
 
 /**
@@ -219,3 +242,23 @@ export function resolveVersionContext(
 
     return versionContext
 }
+
+export function getGlobalSearchContextFilter(query: string): { filter: Filter; spec: string } | null {
+    const globalContextFilter = findFilter(query, FilterType.context, FilterKind.Global)
+    if (!globalContextFilter) {
+        return null
+    }
+    const searchContextSpec = globalContextFilter.value?.value || ''
+    return { filter: globalContextFilter, spec: searchContextSpec }
+}
+
+export const isSearchContextSpecAvailable = memoizeObservable(
+    (spec: string) => isSearchContextAvailable(spec),
+    parameters => parameters
+)
+
+export const getAvailableSearchContextSpecOrDefault = memoizeObservable(
+    ({ spec, defaultSpec }: { spec: string; defaultSpec: string }) =>
+        isSearchContextAvailable(spec).pipe(map(isAvailable => (isAvailable ? spec : defaultSpec))),
+    ({ spec, defaultSpec }) => `${spec}:${defaultSpec}`
+)

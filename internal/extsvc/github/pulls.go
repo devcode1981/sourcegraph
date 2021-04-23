@@ -11,7 +11,6 @@ import (
 	"github.com/Masterminds/semver"
 	"github.com/pkg/errors"
 	"github.com/segmentio/fasthash/fnv1"
-	"github.com/sourcegraph/sourcegraph/internal/vcs/git"
 )
 
 // PageInfo contains the paging information based on the Redux conventions.
@@ -548,7 +547,7 @@ func (c *V4Client) CreatePullRequest(ctx context.Context, in *CreatePullRequestI
 	if ghe221PlusOrDotComSemver.Check(version) {
 		compatibleInput["draft"] = in.Draft
 	} else if in.Draft {
-		return nil, errors.New("draft PRs not supported by this version of GitHub enterprise. GitHub Enterprise v3.21 is the first version to support draft PRs.\nPotential fix: set `published: true` in your campaign spec.")
+		return nil, errors.New("draft PRs not supported by this version of GitHub enterprise. GitHub Enterprise v3.21 is the first version to support draft PRs.\nPotential fix: set `published: true` in your batch spec.")
 	}
 
 	input := map[string]interface{}{"input": compatibleInput}
@@ -829,7 +828,7 @@ query($owner: String!, $name: String!, $number: Int!) {
 						continue
 					}
 					if len(err2.Path) == 1 {
-						return ErrNotFound
+						return ErrRepoNotFound
 					}
 					if prPath, ok := err2.Path[1].(string); !ok || prPath != "pullRequest" {
 						continue
@@ -870,7 +869,7 @@ func (c *V4Client) GetOpenPullRequestByRefs(ctx context.Context, owner, name, ba
 	q.WriteString(fmt.Sprintf("repository(owner: %q, name: %q) {\n",
 		owner, name))
 	q.WriteString(fmt.Sprintf("pullRequests(baseRefName: %q, headRefName: %q, first: 1, states: OPEN) { \n",
-		git.AbbreviateRef(baseRef), git.AbbreviateRef(headRef),
+		abbreviateRef(baseRef), abbreviateRef(headRef),
 	))
 	q.WriteString("nodes{ ... pr }\n}\n}\n}")
 
@@ -906,6 +905,31 @@ func (c *V4Client) GetOpenPullRequestByRefs(ctx context.Context, owner, name, ba
 	pr.TimelineItems = append(pr.TimelineItems, items...)
 
 	return &pr, nil
+}
+
+const createPullRequestCommentMutation = `
+mutation CreatePullRequestComment($input: AddCommentInput!) {
+  addComment(input: $input) {
+    subject { id }
+  }
+}
+`
+
+// CreatePullRequestComment creates a comment on the PullRequest on Github.
+func (c *V4Client) CreatePullRequestComment(ctx context.Context, pr *PullRequest, body string) error {
+	var result struct {
+		AddComment struct {
+			Subject struct {
+				ID string
+			} `json:"subject"`
+		} `json:"addComment"`
+	}
+
+	input := map[string]interface{}{"input": struct {
+		SubjectID string `json:"subjectId"`
+		Body      string `json:"body"`
+	}{SubjectID: pr.ID, Body: body}}
+	return c.requestGraphQL(ctx, createPullRequestCommentMutation, input, &result)
 }
 
 func (c *V4Client) loadRemainingTimelineItems(ctx context.Context, prID string, pageInfo PageInfo) (items []TimelineItem, err error) {
@@ -965,6 +989,14 @@ func (c *V4Client) loadRemainingTimelineItems(ctx context.Context, prID string, 
 		pi = results.Node.TimelineItems.PageInfo
 	}
 	return
+}
+
+// abbreviateRef removes the "refs/heads/" prefix from a given ref. If the ref
+// doesn't have the prefix, it returns it unchanged.
+//
+// Copied from internal/vcs/git to avoid a cyclic import
+func abbreviateRef(ref string) string {
+	return strings.TrimPrefix(ref, "refs/heads/")
 }
 
 // timelineItemTypes contains all the types requested via GraphQL from the timelineItems connection on a pull request.

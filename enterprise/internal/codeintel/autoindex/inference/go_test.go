@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+
+	"github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/autoindex/config"
 )
 
 func TestLSIFGoJobRecognizerCanIndex(t *testing.T) {
@@ -17,7 +19,7 @@ func TestLSIFGoJobRecognizerCanIndex(t *testing.T) {
 		{paths: []string{"go.mod"}, expected: true},
 		{paths: []string{"a/go.mod"}, expected: true},
 		{paths: []string{"package.json"}, expected: false},
-		{paths: []string{"vendor/foo/bar/package.json"}, expected: false},
+		{paths: []string{"vendor/foo/bar/go.mod"}, expected: false},
 		{paths: []string{"foo/bar-go.mod"}, expected: false},
 	}
 
@@ -25,7 +27,7 @@ func TestLSIFGoJobRecognizerCanIndex(t *testing.T) {
 		name := strings.Join(testCase.paths, ", ")
 
 		t.Run(name, func(t *testing.T) {
-			if value := recognizer.CanIndex(testCase.paths); value != testCase.expected {
+			if value := recognizer.CanIndex(testCase.paths, NewMockGitserverClientWrapper()); value != testCase.expected {
 				t.Errorf("unexpected result from CanIndex. want=%v have=%v", testCase.expected, value)
 			}
 		})
@@ -38,9 +40,9 @@ func TestLsifGoJobRecognizerInferIndexJobsGoModRoot(t *testing.T) {
 		"go.mod",
 	}
 
-	expectedIndexJobs := []IndexJob{
+	expectedIndexJobs := []config.IndexJob{
 		{
-			DockerSteps: []DockerStep{
+			Steps: []config.DockerStep{
 				{
 					Root:     "",
 					Image:    lsifGoImage,
@@ -53,7 +55,7 @@ func TestLsifGoJobRecognizerInferIndexJobsGoModRoot(t *testing.T) {
 			Outfile:     "",
 		},
 	}
-	if diff := cmp.Diff(expectedIndexJobs, recognizer.InferIndexJobs(paths)); diff != "" {
+	if diff := cmp.Diff(expectedIndexJobs, recognizer.InferIndexJobs(paths, NewMockGitserverClientWrapper())); diff != "" {
 		t.Errorf("unexpected index jobs (-want +got):\n%s", diff)
 	}
 }
@@ -66,9 +68,9 @@ func TestLsifGoJobRecognizerInferIndexJobsGoModSubdirs(t *testing.T) {
 		"c/go.mod",
 	}
 
-	expectedIndexJobs := []IndexJob{
+	expectedIndexJobs := []config.IndexJob{
 		{
-			DockerSteps: []DockerStep{
+			Steps: []config.DockerStep{
 				{
 					Root:     "a",
 					Image:    lsifGoImage,
@@ -81,7 +83,7 @@ func TestLsifGoJobRecognizerInferIndexJobsGoModSubdirs(t *testing.T) {
 			Outfile:     "",
 		},
 		{
-			DockerSteps: []DockerStep{
+			Steps: []config.DockerStep{
 				{
 					Root:     "b",
 					Image:    lsifGoImage,
@@ -94,7 +96,7 @@ func TestLsifGoJobRecognizerInferIndexJobsGoModSubdirs(t *testing.T) {
 			Outfile:     "",
 		},
 		{
-			DockerSteps: []DockerStep{
+			Steps: []config.DockerStep{
 				{
 					Root:     "c",
 					Image:    lsifGoImage,
@@ -107,7 +109,7 @@ func TestLsifGoJobRecognizerInferIndexJobsGoModSubdirs(t *testing.T) {
 			Outfile:     "",
 		},
 	}
-	if diff := cmp.Diff(expectedIndexJobs, recognizer.InferIndexJobs(paths)); diff != "" {
+	if diff := cmp.Diff(expectedIndexJobs, recognizer.InferIndexJobs(paths, NewMockGitserverClientWrapper())); diff != "" {
 		t.Errorf("unexpected index jobs (-want +got):\n%s", diff)
 	}
 }

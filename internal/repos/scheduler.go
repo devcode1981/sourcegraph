@@ -9,8 +9,11 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
+
 	"github.com/sourcegraph/sourcegraph/internal/api"
 	"github.com/sourcegraph/sourcegraph/internal/conf"
+	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	"github.com/sourcegraph/sourcegraph/internal/gitserver"
 	gitserverprotocol "github.com/sourcegraph/sourcegraph/internal/gitserver/protocol"
 	"github.com/sourcegraph/sourcegraph/internal/mutablelimiter"
@@ -91,6 +94,10 @@ const (
 // then the next update will be scheduled 4 hours from now. If there are still no new commits,
 // then the next update will be scheduled 6 hours from then.
 // This heuristic is simple to compute and has nice backoff properties.
+//
+// If an error occurs when attempting to fetch a repo we perform exponential
+// backoff by doubling the current interval. This ensures that problematic repos
+// don't stay in the front of the schedule clogging up the queue.
 //
 // When it is time for a repo to update, the scheduler inserts the repo into a queue.
 //
@@ -197,6 +204,12 @@ func (s *updateScheduler) runUpdateLoop(ctx context.Context) {
 				}
 				if interval := getCustomInterval(conf.Get(), string(repo.Name)); interval > 0 {
 					s.schedule.updateInterval(repo, interval)
+				} else if err != nil {
+					// On error we will double the current interval so that we back off and don't
+					// get stuck with problematic repos with low intervals.
+					if currentInterval, ok := s.schedule.getCurrentInterval(repo); ok {
+						s.schedule.updateInterval(repo, currentInterval*2)
+					}
 				} else if resp != nil && resp.LastFetched != nil && resp.LastChanged != nil {
 					// This is the heuristic that is described in the updateScheduler documentation.
 					// Update that documentation if you update this logic.
@@ -297,6 +310,11 @@ func (s *updateScheduler) SetCloned(names []string) {
 	s.schedule.setCloned(names)
 }
 
+// EnsureScheduled ensures that all repos in repos exist in the scheduler.
+func (s *updateScheduler) EnsureScheduled(repos []types.RepoName) {
+	s.schedule.insertNew(repos)
+}
+
 // upsert adds r to the scheduler for periodic updates. If r.ID is already in
 // the scheduler, then the fields are updated (upsert).
 //
@@ -348,11 +366,12 @@ func (s *updateScheduler) UpdateOnce(id api.RepoID, name api.RepoName) {
 }
 
 // DebugDump returns the state of the update scheduler for debugging.
-func (s *updateScheduler) DebugDump() interface{} {
+func (s *updateScheduler) DebugDump(ctx context.Context, db dbutil.DB) interface{} {
 	data := struct {
 		Name        string
 		UpdateQueue []*repoUpdate
 		Schedule    []*scheduledRepoUpdate
+		SyncJobs    []*types.ExternalServiceSyncJob
 	}{
 		Name: "repos",
 	}
@@ -381,7 +400,7 @@ func (s *updateScheduler) DebugDump() interface{} {
 	}
 	for i, update := range s.updateQueue.heap {
 		// Copy the repoUpdate as a value so that
-		// poping off the heap here won't update the index value of the real heap, and
+		// popping off the heap here won't update the index value of the real heap, and
 		// we don't do a racy read on the repo pointer which may change concurrently in the real heap.
 		updateCopy := *update
 		updateQueue.heap[i] = &updateCopy
@@ -393,6 +412,12 @@ func (s *updateScheduler) DebugDump() interface{} {
 		// won't change concurrently after we release the lock.
 		update := heap.Pop(&updateQueue).(*repoUpdate)
 		data.UpdateQueue = append(data.UpdateQueue, update)
+	}
+
+	var err error
+	data.SyncJobs, err = database.ExternalServices(db).GetSyncJobs(ctx)
+	if err != nil {
+		log15.Warn("Getting external service sync jobs foe debug page", "error", err)
 	}
 
 	return &data
@@ -564,7 +589,12 @@ func (q *updateQueue) acquireNext() (configuredRepo, bool) {
 // responsibility to ensure they're being guarded by a mutex during any heap operation,
 // i.e. heap.Fix, heap.Remove, heap.Push, heap.Pop.
 
-func (q *updateQueue) Len() int { return len(q.heap) }
+func (q *updateQueue) Len() int {
+	n := len(q.heap)
+	schedUpdateQueueLength.Set(float64(n))
+	return n
+}
+
 func (q *updateQueue) Less(i, j int) bool {
 	qi := q.heap[i]
 	qj := q.heap[j]
@@ -593,7 +623,6 @@ func (q *updateQueue) Push(x interface{}) {
 	item.Seq = q.nextSeq()
 	q.heap = append(q.heap, item)
 	q.index[item.Repo.ID] = item
-	schedUpdateQueueLength.Inc()
 }
 
 func (q *updateQueue) Pop() interface{} {
@@ -602,7 +631,6 @@ func (q *updateQueue) Pop() interface{} {
 	item.Index = -1 // for safety
 	q.heap = q.heap[0 : n-1]
 	delete(q.index, item.Repo.ID)
-	schedUpdateQueueLength.Dec()
 	return item
 }
 
@@ -686,6 +714,44 @@ func (s *schedule) setCloned(names []string) {
 	}
 }
 
+// insertNew will insert repos only if they are not known to the scheduler
+func (s *schedule) insertNew(repos []types.RepoName) {
+	required := make(map[string]struct{}, len(repos))
+	for _, n := range repos {
+		required[strings.ToLower(string(n.Name))] = struct{}{}
+	}
+
+	configuredRepos := make([]configuredRepo, len(repos))
+	for i := range repos {
+		configuredRepos[i] = configuredRepo{
+			ID:   repos[i].ID,
+			Name: repos[i].Name,
+		}
+	}
+
+	due := timeNow().Add(minDelay)
+	rescheduleTimer := false
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, repo := range configuredRepos {
+		if update := s.index[repo.ID]; update != nil {
+			continue
+		}
+		heap.Push(s, &scheduledRepoUpdate{
+			Repo:     repo,
+			Interval: minDelay,
+			Due:      due,
+		})
+		rescheduleTimer = true
+	}
+
+	if rescheduleTimer {
+		s.rescheduleTimer()
+	}
+}
+
 // updateInterval updates the update interval of a repo in the schedule.
 // It does nothing if the repo is not in the schedule.
 func (s *schedule) updateInterval(repo configuredRepo, interval time.Duration) {
@@ -709,6 +775,19 @@ func (s *schedule) updateInterval(repo configuredRepo, interval time.Duration) {
 		s.rescheduleTimer()
 	}
 	s.mu.Unlock()
+}
+
+// getCurrentInterval gets the current interval for the supplied repo and a bool
+// indicating whether it was found.
+func (s *schedule) getCurrentInterval(repo configuredRepo) (time.Duration, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	update, ok := s.index[repo.ID]
+	if !ok || update == nil {
+		return 0, false
+	}
+	return update.Interval, true
 }
 
 // remove removes a repo from the schedule.

@@ -11,11 +11,11 @@ import (
 	"strconv"
 
 	"github.com/inconshreveable/log15"
-	"github.com/sourcegraph/codeintelutils"
 
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/backend"
 	store "github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/stores/dbstore"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/stores/uploadstore"
+	"github.com/sourcegraph/sourcegraph/internal/actor"
 	"github.com/sourcegraph/sourcegraph/internal/api"
 	"github.com/sourcegraph/sourcegraph/internal/conf"
 	"github.com/sourcegraph/sourcegraph/internal/errcode"
@@ -23,6 +23,7 @@ import (
 	"github.com/sourcegraph/sourcegraph/internal/lazyregexp"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 	"github.com/sourcegraph/sourcegraph/internal/vcs"
+	codeintelutils "github.com/sourcegraph/sourcegraph/lib/codeintel/utils"
 )
 
 type UploadHandler struct {
@@ -57,18 +58,21 @@ func (h *UploadHandler) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		repo, ok := ensureRepoAndCommitExist(ctx, w, repoName, commit)
-		if !ok {
-			return
-		}
-		repositoryID = int(repo.ID)
-
 		// 🚨 SECURITY: Ensure we return before proxying to the precise-code-intel-api-server upload
 		// endpoint. This endpoint is unprotected, so we need to make sure the user provides a valid
 		// token proving contributor access to the repository.
 		if !h.internal && conf.Get().LsifEnforceAuth && !isSiteAdmin(ctx) && !enforceAuth(ctx, w, r, repoName) {
 			return
 		}
+
+		// 🚨 SECURITY: It is critical to ensure if repository and commit exists after
+		// the above authz check. Otherwise, it is possible to use this endpoint to
+		// brute-force existence of repositories.
+		repo, ok := ensureRepoAndCommitExist(ctx, w, repoName, commit)
+		if !ok {
+			return
+		}
+		repositoryID = int(repo.ID)
 	}
 
 	payload, err := h.handleEnqueueErr(w, r, repositoryID)
@@ -99,10 +103,11 @@ func (h *UploadHandler) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 // UploadArgs are common arguments required to enqueue an upload for both
 // single-payload and multipart uploads.
 type UploadArgs struct {
-	Commit       string
-	Root         string
-	RepositoryID int
-	Indexer      string
+	Commit            string
+	Root              string
+	RepositoryID      int
+	Indexer           string
+	AssociatedIndexID int
 }
 
 type enqueuePayload struct {
@@ -132,10 +137,11 @@ func (h *UploadHandler) handleEnqueueErr(w http.ResponseWriter, r *http.Request,
 	ctx := r.Context()
 
 	uploadArgs := UploadArgs{
-		Commit:       getQuery(r, "commit"),
-		Root:         sanitizeRoot(getQuery(r, "root")),
-		RepositoryID: repositoryID,
-		Indexer:      getQuery(r, "indexerName"),
+		Commit:            getQuery(r, "commit"),
+		Root:              sanitizeRoot(getQuery(r, "root")),
+		RepositoryID:      repositoryID,
+		Indexer:           getQuery(r, "indexerName"),
+		AssociatedIndexID: getQueryInt(r, "associatedIndexId"),
 	}
 
 	if !hasQuery(r, "multiPart") && !hasQuery(r, "uploadId") {
@@ -219,13 +225,14 @@ func (h *UploadHandler) handleEnqueueSinglePayload(r *http.Request, uploadArgs U
 	}()
 
 	id, err := tx.InsertUpload(ctx, store.Upload{
-		Commit:        uploadArgs.Commit,
-		Root:          uploadArgs.Root,
-		RepositoryID:  uploadArgs.RepositoryID,
-		Indexer:       uploadArgs.Indexer,
-		State:         "uploading",
-		NumParts:      1,
-		UploadedParts: []int{0},
+		Commit:            uploadArgs.Commit,
+		Root:              uploadArgs.Root,
+		RepositoryID:      uploadArgs.RepositoryID,
+		Indexer:           uploadArgs.Indexer,
+		AssociatedIndexID: &uploadArgs.AssociatedIndexID,
+		State:             "uploading",
+		NumParts:          1,
+		UploadedParts:     []int{0},
 	})
 	if err != nil {
 		return nil, err
@@ -258,13 +265,14 @@ func (h *UploadHandler) handleEnqueueMultipartSetup(r *http.Request, uploadArgs 
 	ctx := r.Context()
 
 	id, err := h.dbStore.InsertUpload(ctx, store.Upload{
-		Commit:        uploadArgs.Commit,
-		Root:          uploadArgs.Root,
-		RepositoryID:  uploadArgs.RepositoryID,
-		Indexer:       uploadArgs.Indexer,
-		State:         "uploading",
-		NumParts:      numParts,
-		UploadedParts: nil,
+		Commit:            uploadArgs.Commit,
+		Root:              uploadArgs.Root,
+		RepositoryID:      uploadArgs.RepositoryID,
+		Indexer:           uploadArgs.Indexer,
+		AssociatedIndexID: &uploadArgs.AssociatedIndexID,
+		State:             "uploading",
+		NumParts:          numParts,
+		UploadedParts:     nil,
 	})
 	if err != nil {
 		return nil, err
@@ -339,7 +347,13 @@ func (h *UploadHandler) handleEnqueueMultipartFinalize(r *http.Request, upload s
 	return nil, nil
 }
 
+// 🚨 SECURITY: It is critical to call this function after necessary authz check
+// because this function would bypass authz to for testing if the repository and
+// commit exists in Sourcegraph.
 func ensureRepoAndCommitExist(ctx context.Context, w http.ResponseWriter, repoName, commit string) (*types.Repo, bool) {
+	// This function won't be able to see all repositories without bypassing authz.
+	ctx = actor.WithInternalActor(ctx)
+
 	repo, err := backend.Repos.GetByName(ctx, api.RepoName(repoName))
 	if err != nil {
 		if errcode.IsNotFound(err) {

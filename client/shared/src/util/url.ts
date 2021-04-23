@@ -1,12 +1,13 @@
 import { Position, Range, Selection } from '@sourcegraph/extension-api-types'
-import { WorkspaceRootWithMetadata } from '../api/client/services/workspaceService'
-import { FiltersToTypeAndValue } from '../search/interactive/util'
-import { isEmpty } from 'lodash'
-import { replaceRange } from './strings'
-import { discreteValueAliases } from '../search/query/filters'
-import { tryCatch } from './errors'
+
+import { WorkspaceRootWithMetadata } from '../api/extension/extensionHostApi'
 import { SearchPatternType } from '../graphql-operations'
+import { discreteValueAliases } from '../search/query/filters'
+import { appendContextFilter } from '../search/query/transformer'
 import { findFilter, FilterKind } from '../search/query/validate'
+
+import { tryCatch } from './errors'
+import { replaceRange } from './strings'
 
 export interface RepoSpec {
     /**
@@ -579,9 +580,6 @@ export function withWorkspaceRootInputRevision(
  * @param versionContext (optional): the version context to search in. If undefined, we interpret
  * it as the instance not having version contexts, and won't append the `c` query param.
  * Having a `patternType:` filter in the query overrides this argument.
- * @param filtersInQuery filters in an interactive mode query. For callers of
- * this function requiring correct behavior in interactive mode, this param
- * must be passed.
  *
  */
 export function buildSearchURLQuery(
@@ -589,7 +587,7 @@ export function buildSearchURLQuery(
     patternType: SearchPatternType,
     caseSensitive: boolean,
     versionContext?: string,
-    filtersInQuery?: FiltersToTypeAndValue,
+    searchContextSpec?: string,
     searchParametersList?: { key: string; value: string }[]
 ): string {
     const searchParameters = new URLSearchParams()
@@ -597,29 +595,23 @@ export function buildSearchURLQuery(
     let patternTypeParameter: string = patternType
     let caseParameter: string = caseSensitive ? 'yes' : 'no'
 
-    if (filtersInQuery && !isEmpty(filtersInQuery)) {
-        queryParameter = [generateFiltersQuery(filtersInQuery), queryParameter]
-            .filter(query => query.length > 0)
-            .join(' ')
-    }
-
     const globalPatternType = findFilter(queryParameter, 'patterntype', FilterKind.Global)
     if (globalPatternType?.value) {
         const { start, end } = globalPatternType.range
-        patternTypeParameter =
-            globalPatternType.value.type === 'literal'
-                ? globalPatternType.value.value
-                : globalPatternType.value.quotedValue
+        patternTypeParameter = globalPatternType.value.value
         queryParameter = replaceRange(queryParameter, { start: Math.max(0, start - 1), end }).trim()
     }
 
     const globalCase = findFilter(queryParameter, 'case', FilterKind.Global)
     if (globalCase?.value) {
         // When case:value is explicit in the query, override any previous value of caseParameter.
-        const globalCaseParameterValue =
-            globalCase.value.type === 'literal' ? globalCase.value.value : globalCase.value.quotedValue
+        const globalCaseParameterValue = globalCase.value.value
         caseParameter = discreteValueAliases.yes.includes(globalCaseParameterValue) ? 'yes' : 'no'
         queryParameter = replaceRange(queryParameter, globalCase.range)
+    }
+
+    if (searchContextSpec) {
+        queryParameter = appendContextFilter(queryParameter, searchContextSpec)
     }
 
     searchParameters.set('q', queryParameter)
@@ -640,18 +632,6 @@ export function buildSearchURLQuery(
     }
 
     return searchParameters.toString().replace(/%2F/g, '/').replace(/%3A/g, ':')
-}
-
-/**
- * Creates the raw string representation of the filters currently in the query in interactive mode.
- *
- * @param filtersInQuery the map representing the filters currently in an interactive mode query.
- */
-export function generateFiltersQuery(filtersInQuery: FiltersToTypeAndValue): string {
-    return Object.values(filtersInQuery)
-        .filter(filter => filter.value.trim().length > 0)
-        .map(filter => `${filter.negated ? '-' : ''}${filter.type}:${filter.value}`)
-        .join(' ')
 }
 
 /**

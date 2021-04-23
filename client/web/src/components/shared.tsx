@@ -1,14 +1,15 @@
 import classNames from 'classnames'
 import React, { useCallback, useEffect } from 'react'
-import { ActionsNavItems, ActionsNavItemsProps } from '../../../shared/src/actions/ActionsNavItems'
-import { CommandListPopoverButton, CommandListPopoverButtonProps } from '../../../shared/src/commandPalette/CommandList'
+
+import { ActionsNavItems, ActionsNavItemsProps } from '@sourcegraph/shared/src/actions/ActionsNavItems'
 import {
-    EditorCompletionWidget,
-    EditorCompletionWidgetProps,
-} from '../../../shared/src/components/completion/EditorCompletionWidget'
-import { isErrorLike } from '../../../shared/src/util/errors'
-import { HoverOverlay, HoverOverlayProps } from '../../../shared/src/hover/HoverOverlay'
-import { useLocalStorage } from '../util/useLocalStorage'
+    CommandListPopoverButton,
+    CommandListPopoverButtonProps,
+} from '@sourcegraph/shared/src/commandPalette/CommandList'
+import { HoverOverlay, HoverOverlayProps } from '@sourcegraph/shared/src/hover/HoverOverlay'
+import { isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { useLocalStorage } from '@sourcegraph/shared/src/util/useLocalStorage'
+
 import { HoverThresholdProps } from '../repo/RepoContainer'
 
 // Components from shared with web-styling class names applied
@@ -51,7 +52,7 @@ export const WebHoverOverlay: React.FunctionComponent<HoverOverlayProps & HoverT
             iconClassName="icon-inline"
             iconButtonClassName="btn btn-icon"
             actionItemClassName="btn btn-secondary"
-            infoAlertClassName="alert alert-info"
+            infoAlertClassName="alert alert-secondary" // #18931
             errorAlertClassName="alert alert-danger"
             onAlertDismissed={onAlertDismissed}
         />
@@ -91,17 +92,3 @@ export const WebActionsNavItems: React.FunctionComponent<ActionsNavItemsProps> =
     />
 )
 WebActionsNavItems.displayName = 'WebActionsNavItems'
-
-const completionWidgetListItemClassName = 'completion-widget-dropdown__item d-flex align-items-center p-2'
-
-export const WebEditorCompletionWidget: React.FunctionComponent<EditorCompletionWidgetProps> = props => (
-    <EditorCompletionWidget
-        {...props}
-        listClassName="completion-widget-dropdown d-block list-unstyled rounded p-0 m-0 mt-3"
-        listItemClassName={completionWidgetListItemClassName}
-        selectedListItemClassName="completion-widget-dropdown__item--selected"
-        loadingClassName={completionWidgetListItemClassName}
-        noResultsClassName={completionWidgetListItemClassName}
-    />
-)
-WebEditorCompletionWidget.displayName = 'WebEditorCompletionWidget'

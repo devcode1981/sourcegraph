@@ -1,3 +1,5 @@
+@import './CodeMonitoringNode';
+
 .code-monitoring-page {
     .theme-light & {
         h3,
@@ -16,7 +18,7 @@
 
     &__start {
         &-subheading {
-            font-size: 16px;
+            font-size: 1rem;
         }
 
         &-button {

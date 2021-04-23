@@ -14,9 +14,9 @@ import (
 
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/autoindex/inference"
 	store "github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/stores/dbstore"
+	"github.com/sourcegraph/sourcegraph/internal/conf"
 	"github.com/sourcegraph/sourcegraph/internal/goroutine"
 	"github.com/sourcegraph/sourcegraph/internal/observation"
-	"github.com/sourcegraph/sourcegraph/internal/trace/ot"
 )
 
 const MaxGitserverRequestsPerSecond = 20
@@ -28,6 +28,7 @@ type IndexabilityUpdater struct {
 	minimumSearchCount  int
 	minimumSearchRatio  float64
 	minimumPreciseCount int
+	skipManualInterval  time.Duration
 	enableIndexingCNCF  bool
 	limiter             *rate.Limiter
 }
@@ -40,29 +41,43 @@ func NewIndexabilityUpdater(
 	minimumSearchCount int,
 	minimumSearchRatio float64,
 	minimumPreciseCount int,
+	skipManualInterval time.Duration,
 	interval time.Duration,
-	operations *operations,
+	observationContext *observation.Context,
 ) goroutine.BackgroundRoutine {
 	updater := &IndexabilityUpdater{
 		dbStore:             dbStore,
 		gitserverClient:     gitserverClient,
-		operations:          operations,
+		operations:          newOperations(observationContext),
 		minimumSearchCount:  minimumSearchCount,
 		minimumSearchRatio:  minimumSearchRatio,
 		minimumPreciseCount: minimumPreciseCount,
+		skipManualInterval:  skipManualInterval,
 		enableIndexingCNCF:  os.Getenv("DISABLE_CNCF") == "",
 		limiter:             rate.NewLimiter(MaxGitserverRequestsPerSecond, 1),
 	}
 
-	return goroutine.NewPeriodicGoroutineWithMetrics(context.Background(), interval, updater, operations.handleIndexabilityUpdater)
+	return goroutine.NewPeriodicGoroutineWithMetrics(
+		context.Background(),
+		interval,
+		updater,
+		updater.operations.HandleIndexabilityUpdater,
+	)
 }
 
+// For mocking in tests
+var indexabilityUpdaterEnabled = conf.CodeIntelAutoIndexingEnabled
+
 func (u *IndexabilityUpdater) Handle(ctx context.Context) error {
+	if !indexabilityUpdaterEnabled() {
+		return nil
+	}
+
 	start := time.Now().UTC()
 
 	stats, err := u.dbStore.RepoUsageStatistics(ctx)
 	if err != nil {
-		return errors.Wrap(err, "store.RepoUsageStatistics")
+		return errors.Wrap(err, "dbstore.RepoUsageStatistics")
 	}
 
 	if u.enableIndexingCNCF {
@@ -91,7 +106,7 @@ func (u *IndexabilityUpdater) Handle(ctx context.Context) error {
 	// from RepoUsageStatitsics. Ensure we don't retain the last usage count
 	// for these repositories indefinitely.
 	if err := u.dbStore.ResetIndexableRepositories(ctx, start); err != nil {
-		return errors.Wrap(err, "store.ResetIndexableRepositories")
+		return errors.Wrap(err, "dbstore.ResetIndexableRepositories")
 	}
 
 	return nil
@@ -102,15 +117,30 @@ func (u *IndexabilityUpdater) HandleError(err error) {
 }
 
 func (u *IndexabilityUpdater) queueRepository(ctx context.Context, repoUsageStatistics store.RepoUsageStatistics) (err error) {
-	// Enable tracing on the context and trace the operation
-	ctx = ot.WithShouldTrace(ctx, true)
-
-	ctx, traceLog, endObservation := u.operations.queueRepository.WithAndLogger(ctx, &err, observation.Args{
+	ctx, traceLog, endObservation := u.operations.QueueRepository.WithAndLogger(ctx, &err, observation.Args{
 		LogFields: []log.Field{
 			log.Int("repositoryID", repoUsageStatistics.RepositoryID),
 		},
 	})
 	defer endObservation(1, observation.Args{})
+
+	oneDayAgo := time.Now().Add(-1 * u.skipManualInterval)
+	uploads, count, err := u.dbStore.GetUploads(ctx, store.GetUploadsOptions{
+		RepositoryID:  repoUsageStatistics.RepositoryID,
+		VisibleAtTip:  true,
+		OldestFirst:   false,
+		Limit:         1,
+		Offset:        0,
+		UploadedAfter: &oneDayAgo,
+	})
+	if err != nil {
+		return errors.Wrap(err, "dbstore.GetUploads")
+	}
+
+	if count > 0 && uploads[0].AssociatedIndexID == nil {
+		traceLog(log.Event("recent manual upload, not queueing for autoindexer"))
+		return nil
+	}
 
 	if err := u.limiter.Wait(ctx); err != nil {
 		return err
@@ -128,9 +158,11 @@ func (u *IndexabilityUpdater) queueRepository(ctx context.Context, repoUsageStat
 	}
 	traceLog(log.Int("numPaths", len(paths)))
 
+	gitserverClient := inference.NewGitserverClientShim(repoUsageStatistics.RepositoryID, commit, u.gitserverClient)
+
 	matched := false
 	for name, handler := range inference.Recognizers {
-		matched = handler.CanIndex(paths)
+		matched = handler.CanIndex(paths, gitserverClient)
 		traceLog(log.Bool(fmt.Sprintf("%s.CanIndex", name), matched))
 
 		if matched {
@@ -149,7 +181,7 @@ func (u *IndexabilityUpdater) queueRepository(ctx context.Context, repoUsageStat
 		PreciseCount: &repoUsageStatistics.PreciseCount,
 	}
 	if err := u.dbStore.UpdateIndexableRepository(ctx, indexableRepository, time.Now().UTC()); err != nil {
-		return errors.Wrap(err, "store.UpdateIndexableRepository")
+		return errors.Wrap(err, "dbstore.UpdateIndexableRepository")
 	}
 
 	log15.Debug("Updated indexable repository metadata", "repository_id", repoUsageStatistics.RepositoryID)

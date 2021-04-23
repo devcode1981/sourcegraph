@@ -2,10 +2,8 @@ package graphqlbackend
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -14,12 +12,13 @@ import (
 	"github.com/inconshreveable/log15"
 
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/backend"
+	"github.com/sourcegraph/sourcegraph/cmd/frontend/envvar"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/globals"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/app/updatecheck"
 	"github.com/sourcegraph/sourcegraph/internal/actor"
 	"github.com/sourcegraph/sourcegraph/internal/conf"
 	"github.com/sourcegraph/sourcegraph/internal/env"
-	"github.com/sourcegraph/sourcegraph/internal/prometheusutil"
+	srcprometheus "github.com/sourcegraph/sourcegraph/internal/src-prometheus"
 	"github.com/sourcegraph/sourcegraph/internal/version"
 	"github.com/sourcegraph/sourcegraph/schema"
 )
@@ -63,7 +62,7 @@ type AlertFuncArgs struct {
 }
 
 func (r *siteResolver) Alerts(ctx context.Context) ([]*Alert, error) {
-	settings, err := decodedViewerFinalSettings(ctx)
+	settings, err := decodedViewerFinalSettings(ctx, r.db)
 	if err != nil {
 		return nil, err
 	}
@@ -107,8 +106,16 @@ func init() {
 	// Notify when updates are available, if the instance can access the public internet.
 	AlertFuncs = append(AlertFuncs, updateAvailableAlert)
 
-	// Notify admins if critical alerts are firing.
-	AlertFuncs = append(AlertFuncs, observabilityActiveAlertsAlert(prometheusutil.PrometheusURL))
+	// Notify about postgres deprecation
+	AlertFuncs = append(AlertFuncs, deprecationAlert)
+
+	// Notify admins if critical alerts are firing, if Prometheus is configured.
+	prom, err := srcprometheus.NewClient(srcprometheus.PrometheusURL)
+	if err == nil {
+		AlertFuncs = append(AlertFuncs, observabilityActiveAlertsAlert(prom))
+	} else if !errors.Is(err, srcprometheus.ErrPrometheusUnavailable) {
+		log15.Warn("WARNING: possibly misconfigured Prometheus", "error", err)
+	}
 
 	// Warn about invalid site configuration.
 	AlertFuncs = append(AlertFuncs, func(args AlertFuncArgs) []*Alert {
@@ -224,6 +231,25 @@ func outOfDateAlert(args AlertFuncArgs) []*Alert {
 	return []*Alert{alert}
 }
 
+// This should be removed from 3.27
+func deprecationAlert(args AlertFuncArgs) []*Alert {
+	if envvar.SourcegraphDotComMode() {
+		return nil
+	}
+
+	cv, err := semver.NewVersion(version.Version())
+	if err != nil {
+		log15.Error("cannot determine version", "error", err)
+		return nil
+	}
+
+	if cv.Minor() == 26 && args.IsSiteAdmin {
+		return []*Alert{{TypeValue: AlertTypeInfo, MessageValue: "Support for Postgres v11.x and below will be deprecated from Sourcegraph v3.27. Please reach out to support@sourcegraph.com if you require assistance upgrading.", IsDismissibleWithKeyValue: "true"}}
+	}
+
+	return nil
+}
+
 func determineOutOfDateAlert(isAdmin bool, months int, offline bool) *Alert {
 	if months <= 0 {
 		return nil
@@ -272,53 +298,34 @@ func determineOutOfDateAlert(isAdmin bool, months int, offline bool) *Alert {
 }
 
 // observabilityActiveAlertsAlert directs admins to check Grafana if critical alerts are firing
-func observabilityActiveAlertsAlert(prometheusURL string) func(AlertFuncArgs) []*Alert {
+func observabilityActiveAlertsAlert(prom srcprometheus.Client) func(AlertFuncArgs) []*Alert {
 	return func(args AlertFuncArgs) []*Alert {
 		// true by default - change settings.schema.json if this changes
+		// blocked by https://github.com/sourcegraph/sourcegraph/issues/12190
 		observabilitySiteAlertsDisabled := true
 		if args.ViewerFinalSettings != nil && args.ViewerFinalSettings.AlertsHideObservabilitySiteAlerts != nil {
 			observabilitySiteAlertsDisabled = *args.ViewerFinalSettings.AlertsHideObservabilitySiteAlerts
 		}
 
-		if !args.IsSiteAdmin || prometheusURL == "" || observabilitySiteAlertsDisabled {
+		if !args.IsSiteAdmin || observabilitySiteAlertsDisabled {
 			return nil
-		}
-
-		// set up request to fetch status from prom-wrapper
-		promURL, err := url.Parse(prometheusURL)
-		if err != nil {
-			return []*Alert{{TypeValue: AlertTypeWarning, MessageValue: fmt.Sprintf("Prometheus misconfigured: %s", err)}}
-		}
-		promURL.Path = "/prom-wrapper/alerts-status"
-		req, err := http.NewRequest("GET", promURL.String(), nil)
-		if err != nil {
-			return []*Alert{{TypeValue: AlertTypeWarning, MessageValue: fmt.Sprintf("Prometheus misconfigured: %s", err)}}
 		}
 
 		// use a short timeout to avoid having this block problems from loading
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
-		resp, err := http.DefaultClient.Do(req.WithContext(ctx))
+		status, err := prom.GetAlertsStatus(ctx)
 		if err != nil {
-			return []*Alert{{TypeValue: AlertTypeWarning, MessageValue: fmt.Sprintf("Unable to fetch alerts status: %s", err)}}
-		}
-		if resp.StatusCode != 200 {
-			return []*Alert{{TypeValue: AlertTypeWarning, MessageValue: fmt.Sprintf("Unable to fetch alerts status: status %d", resp.StatusCode)}}
+			return []*Alert{{TypeValue: AlertTypeWarning, MessageValue: fmt.Sprintf("Failed to fetch alerts status: %s", err)}}
 		}
 
-		var alertsStatus map[string]int
-		defer resp.Body.Close()
-		if err := json.NewDecoder(resp.Body).Decode(&alertsStatus); err != nil {
-			return []*Alert{{TypeValue: AlertTypeWarning, MessageValue: err.Error()}}
-		}
-		criticalAlerts := alertsStatus["critical"]
-		servicesCritical := alertsStatus["services_critical"]
-		if criticalAlerts == 0 {
+		// decide whether to render a message about alerts
+		if status.Critical == 0 {
 			return nil
 		}
 		msg := fmt.Sprintf("%s across %s currently firing - [view alerts](/-/debug/grafana)",
-			pluralize(criticalAlerts, "critical alert", "critical alerts"),
-			pluralize(servicesCritical, "service", "services"))
+			pluralize(status.Critical, "critical alert", "critical alerts"),
+			pluralize(status.ServicesCritical, "service", "services"))
 		return []*Alert{{TypeValue: AlertTypeError, MessageValue: msg}}
 	}
 }

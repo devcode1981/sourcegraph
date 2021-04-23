@@ -1,30 +1,33 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import AlertCircleIcon from 'mdi-react/AlertCircleIcon'
 import MapSearchIcon from 'mdi-react/MapSearchIcon'
 import * as React from 'react'
 import { Route, RouteComponentProps, Switch } from 'react-router'
 import { combineLatest, merge, Observable, of, Subject, Subscription } from 'rxjs'
 import { catchError, distinctUntilChanged, map, mapTo, startWith, switchMap } from 'rxjs/operators'
-import { ExtensionsControllerProps } from '../../../../shared/src/extensions/controller'
-import { gql, dataOrThrowErrors } from '../../../../shared/src/graphql/graphql'
-import { PlatformContextProps } from '../../../../shared/src/platform/context'
-import { SettingsCascadeProps } from '../../../../shared/src/settings/settings'
-import { ErrorLike, isErrorLike, asError } from '../../../../shared/src/util/errors'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { ExtensionsControllerProps } from '@sourcegraph/shared/src/extensions/controller'
+import { gql, dataOrThrowErrors } from '@sourcegraph/shared/src/graphql/graphql'
+import { PlatformContextProps } from '@sourcegraph/shared/src/platform/context'
+import { SettingsCascadeProps } from '@sourcegraph/shared/src/settings/settings'
+import { TelemetryProps } from '@sourcegraph/shared/src/telemetry/telemetryService'
+import { ThemeProps } from '@sourcegraph/shared/src/theme'
+import { ErrorLike, isErrorLike, asError } from '@sourcegraph/shared/src/util/errors'
+
+import { AuthenticatedUser } from '../../auth'
+import { requestGraphQL } from '../../backend/graphql'
+import { ErrorMessage } from '../../components/alerts'
+import { BreadcrumbsProps, BreadcrumbSetters } from '../../components/Breadcrumbs'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { HeroPage } from '../../components/HeroPage'
+import { Page } from '../../components/Page'
+import { OrganizationResult, OrganizationVariables, OrgAreaOrganizationFields } from '../../graphql-operations'
 import { NamespaceProps } from '../../namespaces'
+import { PatternTypeProps } from '../../search'
 import { RouteDescriptor } from '../../util/contributions'
+
 import { OrgAreaHeaderNavItem, OrgHeader } from './OrgHeader'
 import { OrgInvitationPage } from './OrgInvitationPage'
-import { PatternTypeProps } from '../../search'
-import { ThemeProps } from '../../../../shared/src/theme'
-import { ErrorMessage } from '../../components/alerts'
-import * as H from 'history'
-import { TelemetryProps } from '../../../../shared/src/telemetry/telemetryService'
-import { AuthenticatedUser } from '../../auth'
-import { BreadcrumbsProps, BreadcrumbSetters } from '../../components/Breadcrumbs'
-import { OrganizationResult, OrganizationVariables, OrgAreaOrganizationFields } from '../../graphql-operations'
-import { requestGraphQL } from '../../backend/graphql'
 
 function queryOrganization(args: { name: string }): Observable<OrgAreaOrganizationFields> {
     return requestGraphQL<OrganizationResult, OrganizationVariables>(
@@ -92,7 +95,6 @@ interface Props
      * The currently authenticated user.
      */
     authenticatedUser: AuthenticatedUser | null
-    history: H.History
     isSourcegraphDotCom: boolean
 }
 
@@ -210,7 +212,7 @@ export class OrgArea extends React.Component<Props> {
                 <HeroPage
                     icon={AlertCircleIcon}
                     title="Error"
-                    subtitle={<ErrorMessage error={this.state.orgOrError} history={this.props.history} />}
+                    subtitle={<ErrorMessage error={this.state.orgOrError} />}
                 />
             )
         }
@@ -234,22 +236,16 @@ export class OrgArea extends React.Component<Props> {
 
         if (this.props.location.pathname === `${this.props.match.url}/invitation`) {
             // The OrgInvitationPage is displayed without the OrgHeader because it is modal-like.
-            return (
-                <OrgInvitationPage
-                    {...context}
-                    onDidRespondToInvitation={this.onDidRespondToInvitation}
-                    history={this.props.history}
-                />
-            )
+            return <OrgInvitationPage {...context} onDidRespondToInvitation={this.onDidRespondToInvitation} />
         }
 
         return (
-            <div className="org-area w-100">
+            <Page className="org-area">
                 <OrgHeader
                     {...this.props}
                     {...context}
                     navItems={this.props.orgAreaHeaderNavItems}
-                    className="border-bottom mt-4"
+                    className="border-bottom"
                 />
                 <div className="container mt-3">
                     <ErrorBoundary location={this.props.location}>
@@ -275,7 +271,7 @@ export class OrgArea extends React.Component<Props> {
                         </React.Suspense>
                     </ErrorBoundary>
                 </div>
-            </div>
+            </Page>
         )
     }
 

@@ -7,14 +7,15 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/backend"
-	"github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/bloomfilter"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/stores/dbstore"
-	"github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/stores/lsifstore"
 	uploadstoremocks "github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/stores/uploadstore/mocks"
+	"github.com/sourcegraph/sourcegraph/enterprise/lib/codeintel/bloomfilter"
+	"github.com/sourcegraph/sourcegraph/enterprise/lib/codeintel/semantic"
 	"github.com/sourcegraph/sourcegraph/internal/api"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 	"github.com/sourcegraph/sourcegraph/internal/vcs"
@@ -53,6 +54,9 @@ func TestHandle(t *testing.T) {
 		"": {"foo.go", "bar.go"},
 	}, nil)
 
+	expectedCommitDate := time.Unix(1587396557, 0).UTC()
+	gitserverClient.CommitDateFunc.SetDefaultReturn(expectedCommitDate, nil)
+
 	handler := &handler{
 		lsifStore:       mockLSIFStore,
 		uploadStore:     mockUploadStore,
@@ -66,9 +70,17 @@ func TestHandle(t *testing.T) {
 		t.Errorf("unexpected requeue")
 	}
 
-	expectedPackages := []lsifstore.Package{
+	if calls := mockDBStore.UpdateCommitedAtFunc.History(); len(calls) != 1 {
+		t.Errorf("unexpected number of UpdateCommitedAt calls. want=%d have=%d", 1, len(mockDBStore.UpdatePackagesFunc.History()))
+	} else if calls[0].Arg1 != 42 {
+		t.Errorf("unexpected UpdateCommitedAt upload id. want=%d have=%d", 42, calls[0].Arg1)
+	} else if calls[0].Arg2 != expectedCommitDate {
+		t.Errorf("unexpected UpdateCommitedAt commit date. want=%s have=%s", expectedCommitDate, calls[0].Arg2)
+	}
+
+	expectedPackagesDumpID := 42
+	expectedPackages := []semantic.Package{
 		{
-			DumpID:  42,
 			Scheme:  "scheme B",
 			Name:    "pkg B",
 			Version: "v1.2.3",
@@ -76,7 +88,9 @@ func TestHandle(t *testing.T) {
 	}
 	if len(mockDBStore.UpdatePackagesFunc.History()) != 1 {
 		t.Errorf("unexpected number of UpdatePackages calls. want=%d have=%d", 1, len(mockDBStore.UpdatePackagesFunc.History()))
-	} else if diff := cmp.Diff(expectedPackages, mockDBStore.UpdatePackagesFunc.History()[0].Arg1); diff != "" {
+	} else if diff := cmp.Diff(expectedPackagesDumpID, mockDBStore.UpdatePackagesFunc.History()[0].Arg1); diff != "" {
+		t.Errorf("unexpected UpdatePackagesFunc args (-want +got):\n%s", diff)
+	} else if diff := cmp.Diff(expectedPackages, mockDBStore.UpdatePackagesFunc.History()[0].Arg2); diff != "" {
 		t.Errorf("unexpected UpdatePackagesFunc args (-want +got):\n%s", diff)
 	}
 
@@ -84,9 +98,9 @@ func TestHandle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error creating filter: %s", err)
 	}
-	expectedPackageReferences := []lsifstore.PackageReference{
+	expectedPackageReferencesDumpID := 42
+	expectedPackageReferences := []semantic.PackageReference{
 		{
-			DumpID:  42,
 			Scheme:  "scheme A",
 			Name:    "pkg A",
 			Version: "v0.1.0",
@@ -95,7 +109,9 @@ func TestHandle(t *testing.T) {
 	}
 	if len(mockDBStore.UpdatePackageReferencesFunc.History()) != 1 {
 		t.Errorf("unexpected number of UpdatePackageReferences calls. want=%d have=%d", 1, len(mockDBStore.UpdatePackageReferencesFunc.History()))
-	} else if diff := cmp.Diff(expectedPackageReferences, mockDBStore.UpdatePackageReferencesFunc.History()[0].Arg1); diff != "" {
+	} else if diff := cmp.Diff(expectedPackageReferencesDumpID, mockDBStore.UpdatePackageReferencesFunc.History()[0].Arg1); diff != "" {
+		t.Errorf("unexpected UpdatePackageReferencesFunc args (-want +got):\n%s", diff)
+	} else if diff := cmp.Diff(expectedPackageReferences, mockDBStore.UpdatePackageReferencesFunc.History()[0].Arg2); diff != "" {
 		t.Errorf("unexpected UpdatePackageReferencesFunc args (-want +got):\n%s", diff)
 	}
 

@@ -72,19 +72,13 @@ body,
     min-width: 0;
 }
 
-// Hide the given element from Percy.
-.percy-hide,
-.monaco-editor .cursor {
-    @media only percy {
-        visibility: hidden !important;
-    }
-}
-
 // Pages
 @import './Layout';
 @import './api/ApiConsole';
 @import './extensions/ExtensionsArea';
 @import './extensions/extension/ExtensionArea';
+@import './extensions/components/StatusBar';
+@import './extensions/components/ActionItemsBar';
 @import './global/GlobalAlerts';
 @import './global/GlobalDebug';
 @import './global/Notices';
@@ -93,6 +87,7 @@ body,
 @import './search/SearchConsolePage';
 @import './repogroups/RepogroupPage';
 @import './search/queryBuilder/index';
+@import './searchContexts/index';
 @import './search/results/SearchResults';
 @import './settings/SettingsFile';
 @import './site-admin/init/SiteInitPage';
@@ -100,6 +95,7 @@ body,
 @import './tree/Tree';
 @import './nav/GlobalNavbar';
 @import './nav/NavLinks';
+@import './nav/IconRadioButtons.scss';
 @import './auth/ResetPasswordPage';
 @import './auth/SignInPage';
 @import './auth/SignUpPage';
@@ -108,10 +104,8 @@ body,
 @import './repo/RepoContainer';
 @import './repo/FilePathBreadcrumbs.scss';
 @import './repo/settings/RepoSettingsArea';
-@import './repo/actions//InstallBrowserExtensionPopover.scss';
+@import './repo/actions/InstallBrowserExtensionPopover.scss';
 @import './repo/actions/InstallBrowserExtensionAlert.scss';
-@import './components/PageHeader';
-@import './components/completion/CompletionWidgetDropdown';
 @import './components/CopyableText';
 @import './components/FilteredConnection';
 @import './components/SaveToolbar';
@@ -122,12 +116,13 @@ body,
 @import '../../branded/src/components/tooltip/Tooltip';
 @import './components/CtaBanner.scss';
 @import './user/settings/UserSettingsArea';
-@import './user/settings/emails/UserSettingsEmailsPage.scss';
 @import './site-admin/SiteAdminAlert';
 @import './site/DockerForMacAlert';
 @import './user/UserAvatar';
 @import './user/area/UserArea';
 @import './org/OrgsArea';
+@import 'insights/pages/InsightsPage';
+@import './components/Badge';
 @import './components/Collapsible';
 @import './components/DismissibleAlert';
 @import './components/Timeline';
@@ -138,7 +133,7 @@ body,
 @import './components/SearchResultMatch';
 @import './components/diff/FileDiffNode';
 @import './components/externalServices/AddExternalServicesPage';
-@import '../../branded/src/components/Tabs';
+@import './components/Sidebar';
 @import '../../branded/src/components/panel/Panel';
 @import '../../branded/src/components/panel/views/FileLocations';
 @import '../../branded/src/components/panel/views/HierarchicalLocationsView';
@@ -150,4 +145,9 @@ body,
     // Skip Reach UI styles. See https://reacttraining.com/reach-ui/styling/.
     --reach-menu-button: 1;
     --reach-accordion: 1;
+    // Media breakpoints
+    --media-sm: 576px;
+    --media-md: 768px;
+    --media-lg: 992px;
+    --media-xl: 1200px;
 }

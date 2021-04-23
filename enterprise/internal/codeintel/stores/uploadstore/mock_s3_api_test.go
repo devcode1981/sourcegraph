@@ -4,9 +4,9 @@ package uploadstore
 
 import (
 	"context"
-	s3 "github.com/aws/aws-sdk-go/service/s3"
-	s3manager "github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"sync"
+
+	s3 "github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 // MockS3API is a mock implementation of the s3API interface (from the
@@ -170,7 +170,7 @@ func (f *S3APIAbortMultipartUploadFunc) SetDefaultHook(hook func(context.Context
 }
 
 // PushHook adds a function to the end of hook queue. Each invocation of the
-// AbortMultipartUpload method of the parent MockS3API instance inovkes the
+// AbortMultipartUpload method of the parent MockS3API instance invokes the
 // hook at the front of the queue and discards it. After the queue is empty,
 // the default hook function is invoked for any future action.
 func (f *S3APIAbortMultipartUploadFunc) PushHook(hook func(context.Context, *s3.AbortMultipartUploadInput) (*s3.AbortMultipartUploadOutput, error)) {
@@ -280,7 +280,7 @@ func (f *S3APICompleteMultipartUploadFunc) SetDefaultHook(hook func(context.Cont
 }
 
 // PushHook adds a function to the end of hook queue. Each invocation of the
-// CompleteMultipartUpload method of the parent MockS3API instance inovkes
+// CompleteMultipartUpload method of the parent MockS3API instance invokes
 // the hook at the front of the queue and discards it. After the queue is
 // empty, the default hook function is invoked for any future action.
 func (f *S3APICompleteMultipartUploadFunc) PushHook(hook func(context.Context, *s3.CompleteMultipartUploadInput) (*s3.CompleteMultipartUploadOutput, error)) {
@@ -388,7 +388,7 @@ func (f *S3APICreateBucketFunc) SetDefaultHook(hook func(context.Context, *s3.Cr
 }
 
 // PushHook adds a function to the end of hook queue. Each invocation of the
-// CreateBucket method of the parent MockS3API instance inovkes the hook at
+// CreateBucket method of the parent MockS3API instance invokes the hook at
 // the front of the queue and discards it. After the queue is empty, the
 // default hook function is invoked for any future action.
 func (f *S3APICreateBucketFunc) PushHook(hook func(context.Context, *s3.CreateBucketInput) (*s3.CreateBucketOutput, error)) {
@@ -497,7 +497,7 @@ func (f *S3APICreateMultipartUploadFunc) SetDefaultHook(hook func(context.Contex
 }
 
 // PushHook adds a function to the end of hook queue. Each invocation of the
-// CreateMultipartUpload method of the parent MockS3API instance inovkes the
+// CreateMultipartUpload method of the parent MockS3API instance invokes the
 // hook at the front of the queue and discards it. After the queue is empty,
 // the default hook function is invoked for any future action.
 func (f *S3APICreateMultipartUploadFunc) PushHook(hook func(context.Context, *s3.CreateMultipartUploadInput) (*s3.CreateMultipartUploadOutput, error)) {
@@ -605,7 +605,7 @@ func (f *S3APIDeleteObjectFunc) SetDefaultHook(hook func(context.Context, *s3.De
 }
 
 // PushHook adds a function to the end of hook queue. Each invocation of the
-// DeleteObject method of the parent MockS3API instance inovkes the hook at
+// DeleteObject method of the parent MockS3API instance invokes the hook at
 // the front of the queue and discards it. After the queue is empty, the
 // default hook function is invoked for any future action.
 func (f *S3APIDeleteObjectFunc) PushHook(hook func(context.Context, *s3.DeleteObjectInput) (*s3.DeleteObjectOutput, error)) {
@@ -713,7 +713,7 @@ func (f *S3APIGetObjectFunc) SetDefaultHook(hook func(context.Context, *s3.GetOb
 }
 
 // PushHook adds a function to the end of hook queue. Each invocation of the
-// GetObject method of the parent MockS3API instance inovkes the hook at the
+// GetObject method of the parent MockS3API instance invokes the hook at the
 // front of the queue and discards it. After the queue is empty, the default
 // hook function is invoked for any future action.
 func (f *S3APIGetObjectFunc) PushHook(hook func(context.Context, *s3.GetObjectInput) (*s3.GetObjectOutput, error)) {
@@ -821,7 +821,7 @@ func (f *S3APIHeadObjectFunc) SetDefaultHook(hook func(context.Context, *s3.Head
 }
 
 // PushHook adds a function to the end of hook queue. Each invocation of the
-// HeadObject method of the parent MockS3API instance inovkes the hook at
+// HeadObject method of the parent MockS3API instance invokes the hook at
 // the front of the queue and discards it. After the queue is empty, the
 // default hook function is invoked for any future action.
 func (f *S3APIHeadObjectFunc) PushHook(hook func(context.Context, *s3.HeadObjectInput) (*s3.HeadObjectOutput, error)) {
@@ -932,7 +932,7 @@ func (f *S3APIPutBucketLifecycleConfigurationFunc) SetDefaultHook(hook func(cont
 
 // PushHook adds a function to the end of hook queue. Each invocation of the
 // PutBucketLifecycleConfiguration method of the parent MockS3API instance
-// inovkes the hook at the front of the queue and discards it. After the
+// invokes the hook at the front of the queue and discards it. After the
 // queue is empty, the default hook function is invoked for any future
 // action.
 func (f *S3APIPutBucketLifecycleConfigurationFunc) PushHook(hook func(context.Context, *s3.PutBucketLifecycleConfigurationInput) (*s3.PutBucketLifecycleConfigurationOutput, error)) {
@@ -1043,7 +1043,7 @@ func (f *S3APIUploadPartCopyFunc) SetDefaultHook(hook func(context.Context, *s3.
 }
 
 // PushHook adds a function to the end of hook queue. Each invocation of the
-// UploadPartCopy method of the parent MockS3API instance inovkes the hook
+// UploadPartCopy method of the parent MockS3API instance invokes the hook
 // at the front of the queue and discards it. After the queue is empty, the
 // default hook function is invoked for any future action.
 func (f *S3APIUploadPartCopyFunc) PushHook(hook func(context.Context, *s3.UploadPartCopyInput) (*s3.UploadPartCopyOutput, error)) {
@@ -1142,7 +1142,7 @@ type MockS3Uploader struct {
 func NewMockS3Uploader() *MockS3Uploader {
 	return &MockS3Uploader{
 		UploadFunc: &S3UploaderUploadFunc{
-			defaultHook: func(context.Context, *s3manager.UploadInput) error {
+			defaultHook: func(context.Context, *s3.PutObjectInput) error {
 				return nil
 			},
 		},
@@ -1154,7 +1154,7 @@ func NewMockS3Uploader() *MockS3Uploader {
 // github.com/sourcegraph/sourcegraph/enterprise/internal/codeintel/stores/uploadstore).
 // It is redefined here as it is unexported in the source packge.
 type surrogateMockS3Uploader interface {
-	Upload(context.Context, *s3manager.UploadInput) error
+	Upload(context.Context, *s3.PutObjectInput) error
 }
 
 // NewMockS3UploaderFrom creates a new mock of the MockS3Uploader interface.
@@ -1170,15 +1170,15 @@ func NewMockS3UploaderFrom(i surrogateMockS3Uploader) *MockS3Uploader {
 // S3UploaderUploadFunc describes the behavior when the Upload method of the
 // parent MockS3Uploader instance is invoked.
 type S3UploaderUploadFunc struct {
-	defaultHook func(context.Context, *s3manager.UploadInput) error
-	hooks       []func(context.Context, *s3manager.UploadInput) error
+	defaultHook func(context.Context, *s3.PutObjectInput) error
+	hooks       []func(context.Context, *s3.PutObjectInput) error
 	history     []S3UploaderUploadFuncCall
 	mutex       sync.Mutex
 }
 
 // Upload delegates to the next hook function in the queue and stores the
 // parameter and result values of this invocation.
-func (m *MockS3Uploader) Upload(v0 context.Context, v1 *s3manager.UploadInput) error {
+func (m *MockS3Uploader) Upload(v0 context.Context, v1 *s3.PutObjectInput) error {
 	r0 := m.UploadFunc.nextHook()(v0, v1)
 	m.UploadFunc.appendCall(S3UploaderUploadFuncCall{v0, v1, r0})
 	return r0
@@ -1186,15 +1186,15 @@ func (m *MockS3Uploader) Upload(v0 context.Context, v1 *s3manager.UploadInput) e
 
 // SetDefaultHook sets function that is called when the Upload method of the
 // parent MockS3Uploader instance is invoked and the hook queue is empty.
-func (f *S3UploaderUploadFunc) SetDefaultHook(hook func(context.Context, *s3manager.UploadInput) error) {
+func (f *S3UploaderUploadFunc) SetDefaultHook(hook func(context.Context, *s3.PutObjectInput) error) {
 	f.defaultHook = hook
 }
 
 // PushHook adds a function to the end of hook queue. Each invocation of the
-// Upload method of the parent MockS3Uploader instance inovkes the hook at
+// Upload method of the parent MockS3Uploader instance invokes the hook at
 // the front of the queue and discards it. After the queue is empty, the
 // default hook function is invoked for any future action.
-func (f *S3UploaderUploadFunc) PushHook(hook func(context.Context, *s3manager.UploadInput) error) {
+func (f *S3UploaderUploadFunc) PushHook(hook func(context.Context, *s3.PutObjectInput) error) {
 	f.mutex.Lock()
 	f.hooks = append(f.hooks, hook)
 	f.mutex.Unlock()
@@ -1203,7 +1203,7 @@ func (f *S3UploaderUploadFunc) PushHook(hook func(context.Context, *s3manager.Up
 // SetDefaultReturn calls SetDefaultDefaultHook with a function that returns
 // the given values.
 func (f *S3UploaderUploadFunc) SetDefaultReturn(r0 error) {
-	f.SetDefaultHook(func(context.Context, *s3manager.UploadInput) error {
+	f.SetDefaultHook(func(context.Context, *s3.PutObjectInput) error {
 		return r0
 	})
 }
@@ -1211,12 +1211,12 @@ func (f *S3UploaderUploadFunc) SetDefaultReturn(r0 error) {
 // PushReturn calls PushDefaultHook with a function that returns the given
 // values.
 func (f *S3UploaderUploadFunc) PushReturn(r0 error) {
-	f.PushHook(func(context.Context, *s3manager.UploadInput) error {
+	f.PushHook(func(context.Context, *s3.PutObjectInput) error {
 		return r0
 	})
 }
 
-func (f *S3UploaderUploadFunc) nextHook() func(context.Context, *s3manager.UploadInput) error {
+func (f *S3UploaderUploadFunc) nextHook() func(context.Context, *s3.PutObjectInput) error {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 
@@ -1254,7 +1254,7 @@ type S3UploaderUploadFuncCall struct {
 	Arg0 context.Context
 	// Arg1 is the value of the 2nd argument passed to this method
 	// invocation.
-	Arg1 *s3manager.UploadInput
+	Arg1 *s3.PutObjectInput
 	// Result0 is the value of the 1st result returned from this method
 	// invocation.
 	Result0 error

@@ -9,8 +9,8 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 
-	"github.com/sourcegraph/sourcegraph/internal/db/dbconn"
-	"github.com/sourcegraph/sourcegraph/internal/db/dbtest"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbconn"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbtest"
 	"github.com/sourcegraph/sourcegraph/internal/repos"
 	"github.com/sourcegraph/sourcegraph/internal/trace"
 )
@@ -57,11 +57,11 @@ func TestIntegration(t *testing.T) {
 		{"DBStore/UpsertRepos", testStoreUpsertRepos},
 		{"DBStore/UpsertSources", testStoreUpsertSources},
 		{"DBStore/EnqueueSyncJobs", testStoreEnqueueSyncJobs(db, store)},
+		{"DBStore/EnqueueSingleSyncJob", testStoreEnqueueSingleSyncJob(db)},
 		{"DBStore/ListExternalRepoSpecs", testStoreListExternalRepoSpecs(db)},
 		{"DBStore/SetClonedRepos", testStoreSetClonedRepos},
 		{"DBStore/CountNotClonedRepos", testStoreCountNotClonedRepos},
 		{"DBStore/Syncer/Sync", testSyncerSync},
-		{"DBStore/Syncer/SyncWithErrors", testSyncerSyncWithErrors},
 		{"DBStore/Syncer/SyncRepo", testSyncRepo},
 		{"DBStore/Syncer/SyncWorker", testSyncWorkerPlumbing(db)},
 		{"DBStore/Syncer/Run", testSyncRun(db)},

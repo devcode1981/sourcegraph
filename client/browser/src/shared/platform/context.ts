@@ -1,26 +1,27 @@
 import { combineLatest, Observable, ReplaySubject } from 'rxjs'
 import { map, switchMap, take } from 'rxjs/operators'
-import { PrivateRepoPublicSourcegraphComError } from '../../../../shared/src/backend/errors'
-import { GraphQLResult } from '../../../../shared/src/graphql/graphql'
-import * as GQL from '../../../../shared/src/graphql/schema'
-import { PlatformContext } from '../../../../shared/src/platform/context'
-import { mutateSettings, updateSettings } from '../../../../shared/src/settings/edit'
-import { EMPTY_SETTINGS_CASCADE, gqlToCascade } from '../../../../shared/src/settings/settings'
-import { LocalStorageSubject } from '../../../../shared/src/util/LocalStorageSubject'
-import { toPrettyBlobURL } from '../../../../shared/src/util/url'
+
+import { PrivateRepoPublicSourcegraphComError } from '@sourcegraph/shared/src/backend/errors'
+import { isHTTPAuthError } from '@sourcegraph/shared/src/backend/fetch'
+import { GraphQLResult } from '@sourcegraph/shared/src/graphql/graphql'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { PlatformContext } from '@sourcegraph/shared/src/platform/context'
+import { mutateSettings, updateSettings } from '@sourcegraph/shared/src/settings/edit'
+import { EMPTY_SETTINGS_CASCADE, gqlToCascade } from '@sourcegraph/shared/src/settings/settings'
+import { asError } from '@sourcegraph/shared/src/util/errors'
+import { LocalStorageSubject } from '@sourcegraph/shared/src/util/LocalStorageSubject'
+import { toPrettyBlobURL } from '@sourcegraph/shared/src/util/url'
+
 import { ExtensionStorageSubject } from '../../browser-extension/web-extension-api/ExtensionStorageSubject'
 import { background } from '../../browser-extension/web-extension-api/runtime'
-import { isInPage } from '../context'
-import { CodeHost } from '../code-hosts/shared/codeHost'
-import { DEFAULT_SOURCEGRAPH_URL, observeSourcegraphURL } from '../util/context'
-import { createExtensionHost } from './extensionHost'
-import { editClientSettings, fetchViewerSettings, mergeCascades, storageSettingsCascade } from './settings'
 import { requestGraphQlHelper } from '../backend/requestGraphQl'
-import { isHTTPAuthError } from '../../../../shared/src/backend/fetch'
-import { asError } from '../../../../shared/src/util/errors'
-import { InlineExtensionsService, shouldUseInlineExtensions } from './inlineExtensionsService'
-import { ModelService } from '../../../../shared/src/api/client/services/modelService'
-import { IExtensionsService, ExtensionsService } from '../../../../shared/src/api/client/services/extensionsService'
+import { CodeHost } from '../code-hosts/shared/codeHost'
+import { isInPage } from '../context'
+import { DEFAULT_SOURCEGRAPH_URL, observeSourcegraphURL } from '../util/context'
+
+import { createExtensionHost } from './extensionHost'
+import { getInlineExtensions, shouldUseInlineExtensions } from './inlineExtensionsService'
+import { editClientSettings, fetchViewerSettings, mergeCascades, storageSettingsCascade } from './settings'
 
 export interface SourcegraphIntegrationURLs {
     /**
@@ -144,17 +145,20 @@ export function createPlatformContext(
             // TODO(sqs): implement tooltips on the browser extension
         },
         createExtensionHost: () => createExtensionHost({ assetsURL }),
-        getScriptURLForExtension: async bundleURL => {
-            if (isInPage) {
-                return bundleURL
+        getScriptURLForExtension: () => {
+            if (isInPage || shouldUseInlineExtensions()) {
+                // inline extensions have fixed scriptURLs
+                return undefined
             }
             // We need to import the extension's JavaScript file (in importScripts in the Web Worker) from a blob:
             // URI, not its original http:/https: URL, because Chrome extensions are not allowed to be published
             // with a CSP that allowlists https://* in script-src (see
             // https://developer.chrome.com/extensions/contentSecurityPolicy#relaxing-remote-script). (Firefox
             // add-ons have an even stricter restriction.)
-            const blobURL = await background.createBlobURL(bundleURL)
-            return blobURL
+            return bundleURLs =>
+                Promise.allSettled(bundleURLs.map(bundleURL => background.createBlobURL(bundleURL))).then(results =>
+                    results.map(result => (result.status === 'rejected' ? asError(result.reason) : result.value))
+                )
         },
         urlToFile: ({ rawRepoName, ...target }, context) => {
             // We don't always resolve the rawRepoName, e.g. if there are multiple definitions.
@@ -170,14 +174,12 @@ export function createPlatformContext(
         sideloadedExtensionURL: isInPage
             ? new LocalStorageSubject<string | null>('sideloadedExtensionURL', null)
             : new ExtensionStorageSubject('sideloadedExtensionURL', null),
-        createExtensionsService(modelService: Pick<ModelService, 'activeLanguages'>): IExtensionsService {
-            // On Firefox extension, use the inline extensions service.
+        getStaticExtensions: () => {
             if (shouldUseInlineExtensions()) {
-                return new InlineExtensionsService()
+                return getInlineExtensions()
             }
 
-            // On all other platforms, use the standard extensions service.
-            return new ExtensionsService(this, modelService)
+            return undefined
         },
     }
     return context

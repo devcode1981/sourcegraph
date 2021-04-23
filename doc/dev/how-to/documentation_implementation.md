@@ -26,7 +26,7 @@ You can preview the documentation site at http://localhost:5080 when running Sou
 You can also run the docsite on its own with the following command:
 
 ```sh
-./dev/docsite.sh -config doc/docsite.json serve -http=localhost:5080
+yarn docsite:serve
 ```
 
 ## Linking to documentation in-product
@@ -48,6 +48,8 @@ To update documentation content, templates, or assets on https://docs.sourcegrap
 - The sidebar lives in `doc/sidebar.md`. Only important pages belong in the sidebar; use section index page links for other documents.
 - Assets and templates live in `doc/_resources/{templates,assets}`.
 
+Updates to the redirects in `doc/_resources/assets/redirects` require a full reload of the service, which involves deleting the relevant Kubernetes pods. See ["Forcing immediate reload of data"](#forcing-immediate-reload-of-data) for more details.
+
 ## Advanced documentation site
 
 Our documentation site (https://docs.sourcegraph.com) runs [docsite](https://github.com/sourcegraph/docsite).
@@ -58,38 +60,17 @@ See "[Updating documentation](#updating-documentation)" and "[Previewing changes
 
 The docs.sourcegraph.com site reloads content, templates, and assets every 5 minutes. After you push a [documentation update](#updating-documentation), just wait up to 5 minutes to see your changes reflected on docs.sourcegraph.com.
 
-If you can't wait 5 minutes and need to force a reload, you can kill the `docs-sourcegraph-com-*` Kubernetes pod on the Sourcegraph.com Kubernetes cluster. (It will restart and come back online with the latest data.)
+If you need to force a reload — either because your change is _extremely_ urgent and can't wait 5 minutes, or because you've updated redirects — you can delete the `docs-sourcegraph-com-*` Kubernetes pod on the Sourcegraph.com Kubernetes cluster. Once done, it will restart and come back online with the latest data.
+
+>WARNING: There may be a few seconds of downtime when restarting the docs cluster this way. This shouldn't be a routine part of your workflow!
+
+To do this, follow the ["Restarting about.sourcegraph.com and docs.sourcegraph.com" playbook](https://about.sourcegraph.com/handbook/engineering/deployments/playbooks#restarting-about-sourcegraph-com-and-docs-sourcegraph-com).
 
 ## Other ways of previewing changes locally (very rare)
 
 The [local documentation server](#previewing-changes-locally) on http://localhost:5080 only serves a single version of the documentation (from the `doc/` directory of your working tree). This usually suffices.
 
 In very rare cases, you may want to run a local documentation server with a different configuration (described in the following sections).
-
-<!-- TODO(ryan): Uncomment once https://github.com/sourcegraph/docsite/issues/13 is fixed.
-
-### Running multi-version support locally
-
-> NOTE: The below does not currently work due to an issue with docsite being unable to load a combination of content and templates/assets locally and over http.
-
-If you're working on a docs template change involving multiple content versions (i.e., doc site URL paths like `/@v1.2.3/my/doc/page`), then you must run a [docsite](https://github.com/sourcegraph/docsite) server that can read multiple content versions:
-
-``` shell
-DOCSITE_CONFIG=$(cat <<-'DOCSITE'
-{
-  "templates": "_resources/templates",
-  "content": "https://codeload.github.com/sourcegraph/sourcegraph/zip/refs/heads/$VERSION#*/doc/",
-  "baseURLPath": "/",
-  "assets": "_resources/assets",
-  "assetsBaseURLPath": "/assets/"
-}
-DOCSITE
-) docsite serve -http=localhost:5081
-
-```
-
-This runs a docsite server on http://localhost:5081 that reads templates and assets from disk (so yo can see your changes reflected immediately upon page reload) but reads content from the remote Git repository at any version (by default `master` if no version is given in the URL path, as in `/@v1.2.3/my/doc/page`).
--->
 
 ### Running a local server that mimics prod configuration
 
@@ -98,13 +79,15 @@ If you want to run the doc site *exactly* as it's deployed (reading templates an
 ```bash
 DOCSITE_CONFIG=$(cat <<-'DOCSITE'
 {
-  "templates": "https://codeload.github.com/sourcegraph/sourcegraph/zip/main#*/doc/_resources/templates/",
-  "assets": "https://codeload.github.com/sourcegraph/sourcegraph/zip/main#*/doc/_resources/assets/",
+  "templates": "https://codeload.github.com/sourcegraph/sourcegraph/zip/docsite-fallback#*/doc/_resources/templates/",
+  "assets": "https://codeload.github.com/sourcegraph/sourcegraph/zip/docsite-fallback#*/doc/_resources/assets/",
   "content": "https://codeload.github.com/sourcegraph/sourcegraph/zip/refs/heads/$VERSION#*/doc/",
-  "defaultContentBranch": "main",
+  "defaultContentBranch": "docsite-fallback",
   "baseURLPath": "/",
   "assetsBaseURLPath": "/assets/"
 }
 DOCSITE
 ) docsite serve -http=localhost:5081
 ```
+
+You can test your changes alongside prod configuration (including things like multi-version support, i.e. `/@version/content`) by pushing your changes to a branch (e.g. `my-branch`) and run the above command after replacing all instances of `main` with `my-branch`.

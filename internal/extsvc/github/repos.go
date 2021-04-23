@@ -12,6 +12,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // SplitRepositoryNameWithOwner splits a GitHub repository's "owner/name" string into "owner" and "name", with
@@ -34,6 +35,8 @@ type Repository struct {
 	IsPrivate     bool   // whether the repository is private
 	IsFork        bool   // whether the repository is a fork of another repository
 	IsArchived    bool   // whether the repository is archived on the code host
+	IsLocked      bool   `json:"-"` // whether the repository is locked on the code host
+	IsDisabled    bool   `json:"-"` // whether the repository is disabled on the code host
 	// This field will always be blank on repos stored in our database because the value will be different
 	// depending on which token was used to fetch it
 	ViewerPermission string // ADMIN, WRITE, READ, or empty if unknown. Only the graphql api populates this. https://developer.github.com/v4/enum/repositorypermission/
@@ -76,7 +79,7 @@ func (c *V3Client) cachedGetRepository(ctx context.Context, key string, getRepos
 		if cached := c.getRepositoryFromCache(ctx, key); cached != nil {
 			reposGitHubCacheCounter.WithLabelValues("hit").Inc()
 			if cached.NotFound {
-				return nil, ErrNotFound
+				return nil, ErrRepoNotFound
 			}
 			return &cached.Repository, nil
 		}
@@ -100,14 +103,10 @@ func (c *V3Client) cachedGetRepository(ctx context.Context, key string, getRepos
 	return repo, nil
 }
 
-var reposGitHubCacheCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+var reposGitHubCacheCounter = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "src_repos_github_cache_hit",
 	Help: "Counts cache hits and misses for GitHub repo metadata.",
 }, []string{"type"})
-
-func init() {
-	prometheus.MustRegister(reposGitHubCacheCounter)
-}
 
 type cachedRepo struct {
 	Repository
@@ -165,10 +164,12 @@ type restRepository struct {
 	DatabaseID  int64  `json:"id"`
 	FullName    string `json:"full_name"` // same as nameWithOwner
 	Description string
-	HTMLURL     string `json:"html_url"` // web URL
-	Private     bool
-	Fork        bool
-	Archived    bool
+	HTMLURL     string                    `json:"html_url"` // web URL
+	Private     bool                      `json:"private"`
+	Fork        bool                      `json:"fork"`
+	Archived    bool                      `json:"archived"`
+	Locked      bool                      `json:"locked"`
+	Disabled    bool                      `json:"disabled"`
 	Permissions restRepositoryPermissions `json:"permissions"`
 }
 
@@ -181,7 +182,7 @@ func (c *V3Client) getRepositoryFromAPI(ctx context.Context, owner, name string)
 	var result restRepository
 	if err := c.requestGet(ctx, fmt.Sprintf("/repos/%s/%s", owner, name), &result); err != nil {
 		if HTTPErrorCode(err) == http.StatusNotFound {
-			return nil, ErrNotFound
+			return nil, ErrRepoNotFound
 		}
 		return nil, err
 	}
@@ -200,6 +201,8 @@ func convertRestRepo(restRepo restRepository) *Repository {
 		IsPrivate:        restRepo.Private,
 		IsFork:           restRepo.Fork,
 		IsArchived:       restRepo.Archived,
+		IsLocked:         restRepo.Locked,
+		IsDisabled:       restRepo.Disabled,
 		ViewerPermission: convertRestRepoPermissions(restRepo.Permissions),
 	}
 }
@@ -316,6 +319,8 @@ fragment RepositoryFields on Repository {
 	isPrivate
 	isFork
 	isArchived
+	isLocked
+	isDisabled
 	viewerPermission
 }
 	`
@@ -333,6 +338,8 @@ fragment RepositoryFields on Repository {
 	isPrivate
 	isFork
 	isArchived
+	isLocked
+	isDisabled
 }
 	`
 }
@@ -491,7 +498,7 @@ func (c *V3Client) ListTopicsOnRepository(ctx context.Context, ownerAndName stri
 	var result restTopicsResponse
 	if err := c.requestGet(ctx, fmt.Sprintf("/repos/%s/%s/topics", owner, name), &result); err != nil {
 		if HTTPErrorCode(err) == http.StatusNotFound {
-			return nil, ErrNotFound
+			return nil, ErrRepoNotFound
 		}
 		return nil, err
 	}

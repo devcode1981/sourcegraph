@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/schema"
 	"github.com/hashicorp/go-multierror"
+
 	"github.com/sourcegraph/sourcegraph/internal/vcs"
 )
 
@@ -119,6 +120,18 @@ func IsUnauthorized(err error) bool {
 	return isErrorPredicate(err, func(err error) bool {
 		e, ok := err.(unauthorizeder)
 		return ok && e.Unauthorized()
+	})
+}
+
+// IsAccountSuspended will check if err or one of its causes was due to the
+// account being suspended
+func IsAccountSuspended(err error) bool {
+	type accountSuspendeder interface {
+		AccountSuspended() bool
+	}
+	return isErrorPredicate(err, func(err error) bool {
+		e, ok := err.(accountSuspendeder)
+		return ok && e.AccountSuspended()
 	})
 }
 

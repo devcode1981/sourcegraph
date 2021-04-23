@@ -20,9 +20,11 @@ import (
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/backend"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/envvar"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/globals"
-	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/app/assetsutil"
+	"github.com/sourcegraph/sourcegraph/cmd/frontend/hubspot"
+	"github.com/sourcegraph/sourcegraph/cmd/frontend/hubspot/hubspotutil"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/app/jscontext"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/handlerutil"
+	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/routevar"
 	"github.com/sourcegraph/sourcegraph/internal/actor"
 	"github.com/sourcegraph/sourcegraph/internal/api"
 	"github.com/sourcegraph/sourcegraph/internal/conf"
@@ -30,10 +32,10 @@ import (
 	"github.com/sourcegraph/sourcegraph/internal/errcode"
 	"github.com/sourcegraph/sourcegraph/internal/gitserver"
 	"github.com/sourcegraph/sourcegraph/internal/repoupdater"
-	"github.com/sourcegraph/sourcegraph/internal/routevar"
 	"github.com/sourcegraph/sourcegraph/internal/types"
 	"github.com/sourcegraph/sourcegraph/internal/vcs"
 	"github.com/sourcegraph/sourcegraph/internal/vcs/git"
+	"github.com/sourcegraph/sourcegraph/ui/assets"
 )
 
 type InjectedHTML struct {
@@ -60,9 +62,10 @@ type Common struct {
 	Injected InjectedHTML
 	Metadata *Metadata
 	Context  jscontext.JSContext
-	AssetURL string
 	Title    string
 	Error    *pageError
+
+	Manifest *assets.WebpackManifest
 
 	WebpackDevServer bool // whether the Webpack dev server is running (WEBPACK_DEV_SERVER env var)
 
@@ -84,6 +87,19 @@ func repoShortName(name api.RepoName) string {
 	return strings.Join(split[1:], "/")
 }
 
+// serveErrorHandler is a function signature used in newCommon and
+// mockNewCommon. This is used as syntactic sugar to prevent programmer's
+// (fragile creatures from planet Earth) from crashing out.
+type serveErrorHandler func(w http.ResponseWriter, r *http.Request, err error, statusCode int)
+
+// mockNewCommon is used in tests to mock newCommon (duh!).
+//
+// Ensure that the mock is reset at the end of every test by adding a call like the following:
+//	defer func() {
+//		mockNewCommon = nil
+//	}()
+var mockNewCommon func(w http.ResponseWriter, r *http.Request, title string, serveError serveErrorHandler) (*Common, error)
+
 // newCommon builds a *Common data structure, returning an error if one occurs.
 //
 // In the event of the repository having been renamed, the request is handled
@@ -99,7 +115,16 @@ func repoShortName(name api.RepoName) string {
 //
 // In the case of a repository that is cloning, a Common data structure is
 // returned but it has an incomplete RevSpec.
-func newCommon(w http.ResponseWriter, r *http.Request, title string, serveError func(w http.ResponseWriter, r *http.Request, err error, statusCode int)) (*Common, error) {
+func newCommon(w http.ResponseWriter, r *http.Request, title string, serveError serveErrorHandler) (*Common, error) {
+	if mockNewCommon != nil {
+		return mockNewCommon(w, r, title, serveError)
+	}
+
+	manifest, err := assets.LoadWebpackManifest()
+	if err != nil {
+		return nil, errors.Wrap(err, "loading webpack manifest")
+	}
+
 	common := &Common{
 		Injected: InjectedHTML{
 			HeadTop:    template.HTML(conf.Get().HtmlHeadTop),
@@ -108,8 +133,8 @@ func newCommon(w http.ResponseWriter, r *http.Request, title string, serveError 
 			BodyBottom: template.HTML(conf.Get().HtmlBodyBottom),
 		},
 		Context:  jscontext.NewJSContextFromRequest(r),
-		AssetURL: assetsutil.URL("").String(),
 		Title:    title,
+		Manifest: manifest,
 		Metadata: &Metadata{
 			Title:       globals.Branding().BrandName,
 			Description: "Sourcegraph is a web-based code search and navigation tool for dev teams. Search, navigate, and review code. Find answers.",
@@ -370,11 +395,48 @@ func serveRepoOrBlob(routeName string, title func(c *Common, r *http.Request) st
 
 // searchBadgeHandler serves the search readme badges from the search-badger service
 // https://github.com/sourcegraph/search-badger
-var searchBadgeHandler = &httputil.ReverseProxy{
-	Director: func(r *http.Request) {
-		r.URL.Scheme = "http"
-		r.URL.Host = "search-badger"
-		r.URL.Path = "/"
-	},
-	ErrorLog: log.New(env.DebugOut, "search-badger proxy: ", log.LstdFlags),
+func searchBadgeHandler() *httputil.ReverseProxy {
+	return &httputil.ReverseProxy{
+		Director: func(r *http.Request) {
+			r.URL.Scheme = "http"
+			r.URL.Host = "search-badger"
+			r.URL.Path = "/"
+		},
+		ErrorLog: log.New(env.DebugOut, "search-badger proxy: ", log.LstdFlags),
+	}
+}
+
+func servePingFromSelfHosted(w http.ResponseWriter, r *http.Request) error {
+	// CORS to allow request from anywhere
+	u, err := url.Parse(r.Referer())
+	if err != nil {
+		return err
+	}
+	w.Header().Add("Access-Control-Allow-Origin", u.Host)
+	w.Header().Add("Access-Control-Allow-Credentials", "true")
+	if r.Method == http.MethodOptions {
+		// CORS preflight request, respond 204 and allow origin header
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+	email := r.URL.Query().Get("email")
+
+	sourceURLCookie, err := r.Cookie("sourcegraphSourceUrl")
+	var sourceURL string
+	if err == nil && sourceURLCookie != nil {
+		sourceURL = sourceURLCookie.Value
+	}
+
+	anonymousUIDCookie, err := r.Cookie("sourcegraphAnonymousUid")
+	var anonymousUserId string
+	if err == nil && anonymousUIDCookie != nil {
+		anonymousUserId = anonymousUIDCookie.Value
+	}
+
+	hubspotutil.SyncUser(email, hubspotutil.SelfHostedSiteInitEventID, &hubspot.ContactProperties{
+		IsServerAdmin:   true,
+		AnonymousUserID: anonymousUserId,
+		FirstSourceURL:  sourceURL,
+	})
+	return nil
 }

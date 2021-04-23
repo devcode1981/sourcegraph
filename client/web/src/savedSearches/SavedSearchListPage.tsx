@@ -7,14 +7,15 @@ import { RouteComponentProps } from 'react-router'
 import { Link } from 'react-router-dom'
 import { Subject, Subscription } from 'rxjs'
 import { catchError, map, mapTo, startWith, switchMap } from 'rxjs/operators'
-import * as GQL from '../../../shared/src/graphql/schema'
-import { asError, ErrorLike, isErrorLike } from '../../../shared/src/util/errors'
-import { buildSearchURLQuery } from '../../../shared/src/util/url'
-import { NamespaceProps } from '../namespaces'
-import { deleteSavedSearch, fetchSavedSearches } from '../search/backend'
-import { PatternTypeProps } from '../search'
+
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { asError, ErrorLike, isErrorLike } from '@sourcegraph/shared/src/util/errors'
+import { buildSearchURLQuery } from '@sourcegraph/shared/src/util/url'
+
 import { ErrorAlert } from '../components/alerts'
-import * as H from 'history'
+import { NamespaceProps } from '../namespaces'
+import { PatternTypeProps } from '../search'
+import { deleteSavedSearch, fetchSavedSearches } from '../search/backend'
 import { eventLogger } from '../tracking/eventLogger'
 
 interface NodeProps extends RouteComponentProps, Omit<PatternTypeProps, 'setPatternType'> {
@@ -107,9 +108,7 @@ interface State {
     savedSearchesOrError?: GQL.ISavedSearch[] | ErrorLike
 }
 
-interface Props extends RouteComponentProps<{}>, NamespaceProps, Omit<PatternTypeProps, 'setPatternType'> {
-    history: H.History
-}
+interface Props extends RouteComponentProps<{}>, NamespaceProps, Omit<PatternTypeProps, 'setPatternType'> {}
 
 export class SavedSearchListPage extends React.Component<Props, State> {
     public subscriptions = new Subscription()
@@ -155,7 +154,7 @@ export class SavedSearchListPage extends React.Component<Props, State> {
                     </div>
                 </div>
                 {this.state.savedSearchesOrError && isErrorLike(this.state.savedSearchesOrError) && (
-                    <ErrorAlert className="mb-3" error={this.state.savedSearchesOrError} history={this.props.history} />
+                    <ErrorAlert className="mb-3" error={this.state.savedSearchesOrError} />
                 )}
                 <div className="list-group list-group-flush">
                     {this.state.savedSearchesOrError &&

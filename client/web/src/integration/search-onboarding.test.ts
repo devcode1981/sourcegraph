@@ -1,11 +1,15 @@
-import { Driver, createDriverForTest } from '../../../shared/src/testing/driver'
+import assert from 'assert'
+
+import expect from 'expect'
+
+import { Driver, createDriverForTest } from '@sourcegraph/shared/src/testing/driver'
+import { afterEachSaveScreenshotIfFailed } from '@sourcegraph/shared/src/testing/screenshotReporter'
+
+import { SearchResult } from '../graphql-operations'
+
 import { WebIntegrationTestContext, createWebIntegrationTestContext } from './context'
-import { afterEachSaveScreenshotIfFailed } from '../../../shared/src/testing/screenshotReporter'
 import { commonWebGraphQlResults } from './graphQlResults'
 import { siteID, siteGQLID } from './jscontext'
-import assert from 'assert'
-import expect from 'expect'
-import { SearchResult } from '../graphql-operations'
 
 describe('Search onboarding', () => {
     let driver: Driver
@@ -48,6 +52,9 @@ describe('Search onboarding', () => {
             }),
             RepoGroups: () => ({
                 repoGroups: [],
+            }),
+            AutoDefinedSearchContexts: () => ({
+                autoDefinedSearchContexts: [],
             }),
             ViewerSettings: () => ({
                 viewerSettings: {
@@ -149,7 +156,6 @@ describe('Search onboarding', () => {
             await driver.page.keyboard.type('test')
             await driver.page.waitForSelector('.test-tour-step-4')
             await driver.page.click('.test-search-button')
-            await driver.assertWindowLocation('/search?q=repo:sourcegraph+test&patternType=literal&onboardingTour=true')
             await driver.page.waitForSelector('.test-tour-step-5')
             await driver.page.click('.test-search-help-dropdown-button-icon')
         })

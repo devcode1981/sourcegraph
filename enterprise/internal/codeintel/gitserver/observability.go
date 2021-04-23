@@ -14,12 +14,13 @@ type operations struct {
 	commitGraph       *observation.Operation
 	directoryChildren *observation.Operation
 	fileExists        *observation.Operation
+	commitExists      *observation.Operation
 	head              *observation.Operation
 	listFiles         *observation.Operation
 	rawContents       *observation.Operation
 }
 
-func makeOperations(observationContext *observation.Context) *operations {
+func newOperations(observationContext *observation.Context) *operations {
 	metrics := metrics.NewOperationMetrics(
 		observationContext.Registerer,
 		"codeintel_gitserver",
@@ -49,6 +50,7 @@ func makeOperations(observationContext *observation.Context) *operations {
 		commitGraph:       op("CommitGraph"),
 		directoryChildren: op("DirectoryChildren"),
 		fileExists:        op("FileExists"),
+		commitExists:      op("CommitExists"),
 		head:              op("Head"),
 		listFiles:         op("ListFiles"),
 		rawContents:       op("RawContents"),

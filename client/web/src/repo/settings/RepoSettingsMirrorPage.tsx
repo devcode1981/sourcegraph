@@ -1,4 +1,4 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import * as H from 'history'
 import CheckIcon from 'mdi-react/CheckIcon'
 import LockIcon from 'mdi-react/LockIcon'
 import * as React from 'react'
@@ -6,19 +6,22 @@ import { RouteComponentProps } from 'react-router'
 import { Link } from 'react-router-dom'
 import { interval, Subject, Subscription } from 'rxjs'
 import { catchError, switchMap, tap } from 'rxjs/operators'
-import * as GQL from '../../../../shared/src/graphql/schema'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { asError } from '@sourcegraph/shared/src/util/errors'
+
+import { ErrorAlert } from '../../components/alerts'
 import { FeedbackText } from '../../components/FeedbackText'
 import { PageTitle } from '../../components/PageTitle'
 import { Timestamp } from '../../components/time/Timestamp'
+import { SettingsAreaRepositoryFields } from '../../graphql-operations'
 import { checkMirrorRepositoryConnection, updateMirrorRepository } from '../../site-admin/backend'
 import { eventLogger } from '../../tracking/eventLogger'
 import { DirectImportRepoAlert } from '../DirectImportRepoAlert'
+
 import { fetchSettingsAreaRepository } from './backend'
 import { ActionContainer, BaseActionContainer } from './components/ActionContainer'
-import { ErrorAlert } from '../../components/alerts'
-import { asError } from '../../../../shared/src/util/errors'
-import * as H from 'history'
-import { SettingsAreaRepositoryFields } from '../../graphql-operations'
 
 interface UpdateMirrorRepositoryActionContainerProps {
     repo: SettingsAreaRepositoryFields
@@ -204,11 +207,7 @@ class CheckMirrorRepositoryConnectionActionContainer extends React.PureComponent
                 details={
                     <>
                         {this.state.errorDescription && (
-                            <ErrorAlert
-                                className="action-container__alert"
-                                error={this.state.errorDescription}
-                                history={this.props.history}
-                            />
+                            <ErrorAlert className="action-container__alert" error={this.state.errorDescription} />
                         )}
                         {this.state.loading && (
                             <div className="alert alert-primary action-container__alert">
@@ -299,7 +298,7 @@ export class RepoSettingsMirrorPage extends React.PureComponent<
                 <PageTitle title="Mirror settings" />
                 <h2>Mirroring and cloning</h2>
                 {this.state.loading && <LoadingSpinner className="icon-inline" />}
-                {this.state.error && <ErrorAlert error={this.state.error} history={this.props.history} />}
+                {this.state.error && <ErrorAlert error={this.state.error} />}
                 <div className="form-group">
                     <label>
                         Remote repository URL{' '}

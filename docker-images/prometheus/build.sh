@@ -26,6 +26,7 @@ go build \
   -trimpath \
   -installsuffix netgo \
   -tags "dist netgo" \
+  -ldflags "-X github.com/sourcegraph/sourcegraph/internal/version.version=$VERSION -X github.com/sourcegraph/sourcegraph/internal/version.timestamp=$(date +%s)" \
   -o "$BUILDDIR"/.bin/prom-wrapper ./cmd/prom-wrapper
 
 # Cross-compile monitoring generator before building the image.
@@ -41,7 +42,7 @@ pushd "$BUILDDIR"
 # https://github.com/sourcegraph/sourcegraph/pull/11832#discussion_r451109637
 chmod -R 777 config
 
-# Enable image build caching via CACHE=true (the jsonnet builds can take a long time)
+# Enable image build caching via CACHE=true
 BUILD_CACHE="--no-cache"
 if [[ "$CACHE" == "true" ]]; then
   BUILD_CACHE=""

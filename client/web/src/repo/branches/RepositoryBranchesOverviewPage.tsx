@@ -1,21 +1,23 @@
-import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
 import ChevronRightIcon from 'mdi-react/ChevronRightIcon'
 import * as React from 'react'
 import { Link, RouteComponentProps } from 'react-router-dom'
 import { Observable, Subject, Subscription } from 'rxjs'
 import { catchError, distinctUntilChanged, map, startWith, switchMap } from 'rxjs/operators'
-import { gql } from '../../../../shared/src/graphql/graphql'
-import * as GQL from '../../../../shared/src/graphql/schema'
-import { createAggregateError, ErrorLike, isErrorLike, asError } from '../../../../shared/src/util/errors'
-import { memoizeObservable } from '../../../../shared/src/util/memoizeObservable'
+
+import { LoadingSpinner } from '@sourcegraph/react-loading-spinner'
+import { Scalars } from '@sourcegraph/shared/src/graphql-operations'
+import { gql } from '@sourcegraph/shared/src/graphql/graphql'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { createAggregateError, ErrorLike, isErrorLike, asError } from '@sourcegraph/shared/src/util/errors'
+import { memoizeObservable } from '@sourcegraph/shared/src/util/memoizeObservable'
+
 import { queryGraphQL } from '../../backend/graphql'
+import { ErrorAlert } from '../../components/alerts'
 import { PageTitle } from '../../components/PageTitle'
 import { eventLogger } from '../../tracking/eventLogger'
 import { gitReferenceFragments, GitReferenceNode } from '../GitReference'
+
 import { RepositoryBranchesAreaPageProps } from './RepositoryBranchesArea'
-import { ErrorAlert } from '../../components/alerts'
-import * as H from 'history'
-import { Scalars } from '../../../../shared/src/graphql-operations'
 
 interface Data {
     defaultBranch: GQL.IGitRef | null
@@ -69,9 +71,7 @@ const queryGitBranches = memoizeObservable(
     args => `${args.repo}:${args.first}`
 )
 
-interface Props extends RepositoryBranchesAreaPageProps, RouteComponentProps<{}> {
-    history: H.History
-}
+interface Props extends RepositoryBranchesAreaPageProps, RouteComponentProps<{}> {}
 
 interface State {
     /** The page content, undefined while loading, or an error. */
@@ -124,7 +124,7 @@ export class RepositoryBranchesOverviewPage extends React.PureComponent<Props, S
                 {this.state.dataOrError === undefined ? (
                     <LoadingSpinner className="icon-inline mt-2" />
                 ) : isErrorLike(this.state.dataOrError) ? (
-                    <ErrorAlert className="mt-2" error={this.state.dataOrError} history={this.props.history} />
+                    <ErrorAlert className="mt-2" error={this.state.dataOrError} />
                 ) : (
                     <div className="repository-branches-page__cards">
                         {this.state.dataOrError.defaultBranch && (

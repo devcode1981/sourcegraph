@@ -1,10 +1,12 @@
 import { isEqual } from 'lodash'
 import { from, Observable, of, throwError } from 'rxjs'
-import { catchError, distinctUntilChanged, map, publishReplay, refCount, switchMap } from 'rxjs/operators'
+import { catchError, distinctUntilChanged, map, shareReplay, switchMap } from 'rxjs/operators'
+
 import { gql } from '../graphql/graphql'
 import * as GQL from '../graphql/schema'
 import { PlatformContext } from '../platform/context'
 import { asError, createAggregateError } from '../util/errors'
+
 import { ConfiguredRegistryExtension, extensionIDsFromSettings, toConfiguredRegistryExtension } from './extension'
 
 /**
@@ -20,8 +22,10 @@ export function viewerConfiguredExtensions({
         distinctUntilChanged((a, b) => isEqual(a, b)),
         switchMap(extensionIDs => queryConfiguredRegistryExtensions({ requestGraphQL }, extensionIDs)),
         catchError(error => throwError(asError(error))),
-        publishReplay(),
-        refCount()
+        // TODO: Restore reference counter after refactoring contributions service
+        // to not unsubscribe from existing entries when new entries are registered,
+        // in order to ensure that the source is unsubscribed from.
+        shareReplay(1)
     )
 }
 
@@ -31,6 +35,8 @@ export function viewerConfiguredExtensions({
  * @returns An observable that emits once with the results.
  */
 export function queryConfiguredRegistryExtensions(
+    // TODO(tj): can copy this over to extension host, just replace platformContext.requestGraphQL
+    // with mainThreadAPI.requestGraphQL
     { requestGraphQL }: Pick<PlatformContext, 'requestGraphQL'>,
     extensionIDs: string[]
 ): Observable<ConfiguredRegistryExtension[]> {

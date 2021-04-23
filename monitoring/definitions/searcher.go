@@ -21,9 +21,8 @@ func Searcher() *monitoring.Container {
 							Name:              "unindexed_search_request_errors",
 							Description:       "unindexed search request errors every 5m by code",
 							Query:             `sum by (code)(increase(searcher_service_request_total{code!="200",code!="canceled"}[5m])) / ignoring(code) group_left sum(increase(searcher_service_request_total[5m])) * 100`,
-							DataMayNotExist:   true,
-							Warning:           monitoring.Alert().GreaterOrEqual(5).For(5 * time.Minute),
-							PanelOptions:      monitoring.PanelOptions().LegendFormat("{{code}}").Unit(monitoring.Percentage),
+							Warning:           monitoring.Alert().GreaterOrEqual(5, nil).For(5 * time.Minute),
+							Panel:             monitoring.Panel().LegendFormat("{{code}}").Unit(monitoring.Percentage),
 							Owner:             monitoring.ObservableOwnerSearch,
 							PossibleSolutions: "none",
 						},
@@ -31,59 +30,58 @@ func Searcher() *monitoring.Container {
 							Name:              "replica_traffic",
 							Description:       "requests per second over 10m",
 							Query:             "sum by(instance) (rate(searcher_service_request_total[10m]))",
-							Warning:           monitoring.Alert().GreaterOrEqual(5),
-							PanelOptions:      monitoring.PanelOptions().LegendFormat("{{instance}}"),
+							Warning:           monitoring.Alert().GreaterOrEqual(5, nil),
+							Panel:             monitoring.Panel().LegendFormat("{{instance}}"),
 							Owner:             monitoring.ObservableOwnerSearch,
 							PossibleSolutions: "none",
 						},
-						shared.FrontendInternalAPIErrorResponses("searcher", monitoring.ObservableOwnerSearch),
+						shared.FrontendInternalAPIErrorResponses("searcher", monitoring.ObservableOwnerSearch).Observable(),
 					},
 				},
 			},
 			{
-				Title:  "Container monitoring (not available on server)",
+				Title:  shared.TitleContainerMonitoring,
 				Hidden: true,
 				Rows: []monitoring.Row{
 					{
-						shared.ContainerCPUUsage("searcher", monitoring.ObservableOwnerSearch),
-						shared.ContainerMemoryUsage("searcher", monitoring.ObservableOwnerSearch),
+						shared.ContainerCPUUsage("searcher", monitoring.ObservableOwnerSearch).Observable(),
+						shared.ContainerMemoryUsage("searcher", monitoring.ObservableOwnerSearch).Observable(),
 					},
 					{
-						shared.ContainerRestarts("searcher", monitoring.ObservableOwnerSearch),
-						shared.ContainerFsInodes("searcher", monitoring.ObservableOwnerSearch),
+						shared.ContainerMissing("searcher", monitoring.ObservableOwnerSearch).Observable(),
 					},
 				},
 			},
 			{
-				Title:  "Provisioning indicators (not available on server)",
+				Title:  shared.TitleProvisioningIndicators,
 				Hidden: true,
 				Rows: []monitoring.Row{
 					{
-						shared.ProvisioningCPUUsageLongTerm("searcher", monitoring.ObservableOwnerSearch),
-						shared.ProvisioningMemoryUsageLongTerm("searcher", monitoring.ObservableOwnerSearch),
+						shared.ProvisioningCPUUsageLongTerm("searcher", monitoring.ObservableOwnerSearch).Observable(),
+						shared.ProvisioningMemoryUsageLongTerm("searcher", monitoring.ObservableOwnerSearch).Observable(),
 					},
 					{
-						shared.ProvisioningCPUUsageShortTerm("searcher", monitoring.ObservableOwnerSearch),
-						shared.ProvisioningMemoryUsageShortTerm("searcher", monitoring.ObservableOwnerSearch),
-					},
-				},
-			},
-			{
-				Title:  "Golang runtime monitoring",
-				Hidden: true,
-				Rows: []monitoring.Row{
-					{
-						shared.GoGoroutines("searcher", monitoring.ObservableOwnerSearch),
-						shared.GoGcDuration("searcher", monitoring.ObservableOwnerSearch),
+						shared.ProvisioningCPUUsageShortTerm("searcher", monitoring.ObservableOwnerSearch).Observable(),
+						shared.ProvisioningMemoryUsageShortTerm("searcher", monitoring.ObservableOwnerSearch).Observable(),
 					},
 				},
 			},
 			{
-				Title:  "Kubernetes monitoring (ignore if using Docker Compose or server)",
+				Title:  shared.TitleGolangMonitoring,
 				Hidden: true,
 				Rows: []monitoring.Row{
 					{
-						shared.KubernetesPodsAvailable("searcher", monitoring.ObservableOwnerSearch),
+						shared.GoGoroutines("searcher", monitoring.ObservableOwnerSearch).Observable(),
+						shared.GoGcDuration("searcher", monitoring.ObservableOwnerSearch).Observable(),
+					},
+				},
+			},
+			{
+				Title:  shared.TitleKubernetesMonitoring,
+				Hidden: true,
+				Rows: []monitoring.Row{
+					{
+						shared.KubernetesPodsAvailable("searcher", monitoring.ObservableOwnerSearch).Observable(),
 					},
 				},
 			},

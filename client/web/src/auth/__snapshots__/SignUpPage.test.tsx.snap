@@ -185,6 +185,7 @@ exports[`SignUpPage renders sign up page (cloud) 1`] = `
         >
           <a
             className="btn btn-secondary btn-block"
+            onClick={[Function]}
           >
             <svg
               className="mdi-icon icon-inline"

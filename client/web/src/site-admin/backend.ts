@@ -1,18 +1,20 @@
 import { parse as parseJSONC } from '@sqs/jsonc-parser'
 import { Observable } from 'rxjs'
 import { map, tap, mapTo } from 'rxjs/operators'
-import { repeatUntil } from '../../../shared/src/util/rxjs/repeatUntil'
+
 import {
     createInvalidGraphQLMutationResponseError,
     dataOrThrowErrors,
     isErrorGraphQLResult,
     gql,
-} from '../../../shared/src/graphql/graphql'
-import { createAggregateError } from '../../../shared/src/util/errors'
-import * as GQL from '../../../shared/src/graphql/schema'
-import { resetAllMemoizationCaches } from '../../../shared/src/util/memoizeObservable'
+} from '@sourcegraph/shared/src/graphql/graphql'
+import * as GQL from '@sourcegraph/shared/src/graphql/schema'
+import { Settings } from '@sourcegraph/shared/src/settings/settings'
+import { createAggregateError } from '@sourcegraph/shared/src/util/errors'
+import { resetAllMemoizationCaches } from '@sourcegraph/shared/src/util/memoizeObservable'
+import { repeatUntil } from '@sourcegraph/shared/src/util/rxjs/repeatUntil'
+
 import { mutateGraphQL, queryGraphQL, requestGraphQL } from '../backend/graphql'
-import { Settings } from '../../../shared/src/settings/settings'
 import {
     UserRepositoriesResult,
     UserRepositoriesVariables,
@@ -44,6 +46,14 @@ import {
     ScheduleUserPermissionsSyncVariables,
     ScheduleRepositoryPermissionsSyncResult,
     ScheduleRepositoryPermissionsSyncVariables,
+    UserPublicRepositoriesResult,
+    UserPublicRepositoriesVariables,
+    UserPublicRepositoriesFields,
+    SetUserPublicRepositoriesResult,
+    SetUserPublicRepositoriesVariables,
+    OutOfBandMigrationFields,
+    OutOfBandMigrationsResult,
+    OutOfBandMigrationsVariables,
 } from '../graphql-operations'
 
 /**
@@ -211,6 +221,21 @@ export function listUserRepositories(
             }
             return data.node.repositories
         })
+    )
+}
+
+export function listUserRepositoriesAndPollIfEmptyOrAnyCloning(
+    args: Partial<UserRepositoriesVariables>
+): Observable<NonNullable<UserRepositoriesResult['node']>['repositories']> {
+    return listUserRepositories(args).pipe(
+        // Poll every 5000ms if repositories are being cloned or the list is empty.
+        repeatUntil(
+            result =>
+                result.nodes &&
+                result.nodes.length > 0 &&
+                result.nodes.every(nodes => !nodes.mirrorInfo.cloneInProgress && nodes.mirrorInfo.cloned),
+            { delay: 5000 }
+        )
     )
 }
 
@@ -527,10 +552,9 @@ export function fetchAllConfigAndSettings(): Observable<AllConfig> {
     ).pipe(
         map(dataOrThrowErrors),
         map(data => {
-            const externalServices: Partial<Record<
-                ExternalServiceKind,
-                ExternalServiceConfig[]
-            >> = data.externalServices.nodes
+            const externalServices: Partial<
+                Record<ExternalServiceKind, ExternalServiceConfig[]>
+            > = data.externalServices.nodes
                 .filter(svc => svc.config)
                 .map(svc => [svc.kind, parseJSONC(svc.config) as ExternalServiceConfig] as const)
                 .reduce<Partial<{ [k in ExternalServiceKind]: ExternalServiceConfig[] }>>(
@@ -741,7 +765,7 @@ export function fetchSiteUpdateCheck(): Observable<SiteUpdateCheckResult['site']
  * @param days number of days of data to fetch
  */
 export function fetchMonitoringStats(days: number): Observable<GQL.IMonitoringStatistics | false> {
-    // more details in /internal/prometheusutil.ErrPrometheusUnavailable
+    // more details in /internal/srcprometheus.ErrPrometheusUnavailable
     const errorPrometheusUnavailable = 'prometheus API is unavailable'
     return queryGraphQL(
         gql`
@@ -776,5 +800,88 @@ export function fetchMonitoringStats(days: number): Observable<GQL.IMonitoringSt
             }
             return data
         })
+    )
+}
+
+export function queryUserPublicRepositories(
+    userId: Scalars['ID']
+): Observable<UserPublicRepositoriesFields[] | undefined> {
+    return requestGraphQL<UserPublicRepositoriesResult, UserPublicRepositoriesVariables>(
+        gql`
+            query UserPublicRepositories($userId: ID!) {
+                node(id: $userId) {
+                    ... on User {
+                        publicRepositories {
+                            ...UserPublicRepositoriesFields
+                        }
+                    }
+                }
+            }
+            fragment UserPublicRepositoriesFields on Repository {
+                id
+                name
+            }
+        `,
+        { userId }
+    ).pipe(
+        map(dataOrThrowErrors),
+        map(data => {
+            if (data?.node) {
+                return data.node.publicRepositories
+            }
+            return []
+        })
+    )
+}
+
+export function setUserPublicRepositories(
+    userId: Scalars['ID'],
+    repos: string[]
+): Observable<SetUserPublicRepositoriesResult> {
+    return requestGraphQL<SetUserPublicRepositoriesResult, SetUserPublicRepositoriesVariables>(
+        gql`
+            mutation SetUserPublicRepositories($userId: ID!, $repos: [String!]!) {
+                SetUserPublicRepos(userID: $userId, repoURIs: $repos) {
+                    alwaysNil
+                }
+            }
+        `,
+        { userId, repos }
+    ).pipe(map(dataOrThrowErrors))
+}
+
+/**
+ * Fetches all out-of-band migrations.
+ */
+export function fetchAllOutOfBandMigrations(): Observable<OutOfBandMigrationFields[]> {
+    return requestGraphQL<OutOfBandMigrationsResult, OutOfBandMigrationsVariables>(
+        gql`
+            query OutOfBandMigrations {
+                outOfBandMigrations {
+                    ...OutOfBandMigrationFields
+                }
+            }
+
+            fragment OutOfBandMigrationFields on OutOfBandMigration {
+                id
+                team
+                component
+                description
+                introduced
+                deprecated
+                progress
+                created
+                lastUpdated
+                nonDestructive
+                applyReverse
+                errors {
+                    message
+                    created
+                }
+            }
+        `
+    ).pipe(
+        map(dataOrThrowErrors),
+        map(data => data.outOfBandMigrations)
     )
 }
